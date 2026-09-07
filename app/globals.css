@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #1c2b2a;
+  --paper: #eef1ea;
+  --teal-clinico: #2f6f62;
+  --navy: #24425a;
+  --rust-alerta: #a8442e;
+  --grafite: #6b7268;
+}
+
+@layer base {
+  * {
+    border-color: rgb(107 114 104 / 0.2);
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+  }
+}
+
+.hairline {
+  border-color: rgb(107 114 104 / 0.25);
+}
+
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-hero-in {
+  animation: hero-in 400ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hero-in {
+    animation: none;
+  }
+}
