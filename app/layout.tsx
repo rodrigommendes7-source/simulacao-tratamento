@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { jakarta, jetbrainsMono } from "./fonts";
 import AppShell from "../components/AppShell";
 import { SCRIPT_TEMA_INICIAL } from "../lib/tema";
@@ -34,6 +35,7 @@ export default function RootLayout({
         className={`${jakarta.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <AppShell>{children}</AppShell>
+        <Analytics />
       </body>
     </html>
   );
