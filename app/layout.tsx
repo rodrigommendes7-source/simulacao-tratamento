@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { newsreader, ibmPlexSans, ibmPlexMono } from "./fonts";
+import { jakarta, jetbrainsMono } from "./fonts";
+import AppShell from "../components/AppShell";
+import { SCRIPT_TEMA_INICIAL } from "../lib/tema";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,11 +16,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-PT">
+    <html lang="pt-PT" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA_INICIAL }} />
+      </head>
+      {/*
+        suppressHydrationWarning no <body> por causa de extensões do browser
+        (Grammarly e afins) que injetam atributos como
+        `data-new-gr-c-s-check-loaded` antes de o React hidratar: o servidor
+        nunca os escreveu, e o aviso resultante não corresponde a nenhum
+        problema da aplicação. O aviso só é suprimido neste elemento — não se
+        propaga aos filhos, por isso uma divergência real dentro da árvore
+        continua a ser reportada.
+      */}
       <body
-        className={`${newsreader.variable} ${ibmPlexSans.variable} ${ibmPlexMono.variable} font-sans antialiased`}
+        suppressHydrationWarning
+        className={`${jakarta.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

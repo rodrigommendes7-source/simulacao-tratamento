@@ -2,47 +2,436 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --ink: #1c2b2a;
-  --paper: #eef1ea;
-  --teal-clinico: #2f6f62;
-  --navy: #24425a;
-  --rust-alerta: #a8442e;
-  --grafite: #6b7268;
+/* Modo escuro (preto + verde escuro) — tema por omissão. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #050805;
+  --surface: #0f1712;
+  --surface-alt: #14201a;
+  --soft: #131f18;
+  --soft-alt: #101a14;
+  --line: #21322a;
+  --line-strong: #6d8a7c;
+  --track: #182620;
+  --selected: #163223;
+
+  --nav-bg: #0b120e;
+  --nav-line: #1c2820;
+  --nav-bg-translucent: rgba(5, 8, 5, 0.82);
+
+  --ink: #e9f3ec;
+  --text-soft: #c3d6cb;
+  --muted: #9cb2a5;
+  --label: #8fa89a;
+
+  --accent: #22c55e;
+  --accent-hover: #3ddb78;
+  --accent-ink: #06210f;
+  --accent-glow: rgba(34, 197, 94, 0.45);
+
+  --tile-alt: #143322;
+  --tile-alt-ink: #bfe8cf;
+
+  --success: #4ade80;
+  --success-border: #2f6b46;
+  --danger: #f0958a;
+  --warning: #e7c076;
+
+  --shadow-lg: rgba(0, 0, 0, 0.85);
 }
 
-@layer base {
-  * {
-    border-color: rgb(107 114 104 / 0.2);
-  }
+/* Modo claro (branco + azul claro). */
+:root[data-theme="light"] {
+  color-scheme: light;
 
-  body {
-    background-color: var(--paper);
-    color: var(--ink);
-  }
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-alt: #eaf3fb;
+  --soft: #eef6fc;
+  --soft-alt: #e4f0fa;
+  --line: #d7e6f2;
+  --line-strong: #658ead;
+  --track: #dceaf5;
+  --selected: #dceefb;
+
+  --nav-bg: #eef5fb;
+  --nav-line: #dbe9f5;
+  --nav-bg-translucent: rgba(255, 255, 255, 0.82);
+
+  --ink: #0d1b26;
+  --text-soft: #2f4a5b;
+  --muted: #4c6675;
+  --label: #4e6a79;
+
+  --accent: #0b64ad;
+  --accent-hover: #084f8a;
+  --accent-ink: #ffffff;
+  --accent-glow: rgba(11, 100, 173, 0.35);
+
+  --tile-alt: #e3f1fc;
+  --tile-alt-ink: #14537e;
+
+  --success: #0a7038;
+  --success-border: #5b9e79;
+  --danger: #b02a20;
+  --warning: #7a5600;
+
+  --shadow-lg: rgba(16, 32, 44, 0.16);
 }
 
-.hairline {
-  border-color: rgb(107 114 104 / 0.25);
+* {
+  box-sizing: border-box;
 }
 
-@keyframes hero-in {
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hover);
+}
+
+@keyframes up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
+  }
+}
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes drop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -230%) scale(0.5);
+  }
+  65% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.22);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes halo {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  100% {
+    box-shadow: 0 0 0 22px rgba(0, 0, 0, 0);
   }
 }
 
-.animate-hero-in {
-  animation: hero-in 400ms ease-out both;
+.animate-up {
+  animation: up 0.45s both;
 }
 
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+}
+.soft {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.lbl {
+  font: 500 10.5px/1 "var(--font-jetbrains)", monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+.mu {
+  color: var(--muted);
+}
+.h1 {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0;
+}
+.h2 {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.h3 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1),
+    background 0.18s,
+    border-color 0.18s,
+    color 0.18s;
+}
+.chip:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  background: var(--surface-alt);
+}
+.chip-on {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-ink) !important;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-alt);
+  color: var(--ink);
+  font: 600 14px/1 inherit;
+  cursor: pointer;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1),
+    background 0.18s,
+    box-shadow 0.25s;
+}
+.btn:hover {
+  transform: translateY(-2px);
+  background: var(--soft-alt);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-p {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.btn-p:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 10px 30px -12px var(--accent-glow);
+}
+.nav {
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--nav-bg);
+  border: 1px solid var(--nav-line);
+}
+.nav button,
+.nav a {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13px/1 inherit;
+  padding: 11px 15px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background 0.2s;
+  display: inline-block;
+}
+.nav button:hover,
+.nav a:hover {
+  color: var(--ink);
+}
+.nav-on {
+  background: var(--accent) !important;
+  color: var(--accent-ink) !important;
+}
+.tile {
+  border-radius: 22px;
+  padding: 20px;
+  cursor: pointer;
+  transition:
+    transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1),
+    box-shadow 0.3s;
+}
+.tile:hover {
+  transform: translateY(-5px) scale(1.01);
+  box-shadow: 0 24px 50px -26px var(--shadow-lg);
+}
+.ph {
+  background: repeating-linear-gradient(135deg, var(--surface-alt) 0 9px, var(--soft-alt) 9px 18px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 11px "var(--font-jetbrains)", monospace;
+  color: var(--label);
+  text-align: center;
+  overflow: hidden;
+  position: relative;
+}
+.ph img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wrapchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.qa {
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 18px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.2s;
+}
+.qa:hover {
+  border-color: var(--line-strong);
+}
+.bar {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+/* ── Consulta pontual: seleção circular e animação de geração ── */
+
+/*
+  Duas variantes da mesma entrada: no anel as opções estão centradas no seu
+  ponto por translate(-50%,-50%), e a animação tem de acabar exatamente nessa
+  posição; na grelha estreita não há translate nenhum. Uma keyframe só para os
+  dois casos deslocava as etiquetas da grelha meia largura para cima e para a
+  esquerda.
+*/
+@keyframes bolha-entra-anel {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes bolha-entra-simples {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.bolha-opcao {
+  animation: bolha-entra-anel 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  transition:
+    background 0.16s,
+    border-color 0.16s,
+    color 0.16s,
+    box-shadow 0.16s;
+}
+.bolha-opcao-simples {
+  animation: bolha-entra-simples 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+.bolha-opcao:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px -10px var(--shadow-lg);
+}
+
+.bolha-central {
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    color 0.2s,
+    transform 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+/* O centro já está posicionado por um contentor próprio, por isso aqui só escala. */
+.bolha-central:hover {
+  transform: scale(1.04);
+}
+
+@keyframes procura {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.anel-procura {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: procura 1.5s ease-out infinite;
+}
+.anel-procura-2 {
+  animation-delay: 0.75s;
+}
+
+/* Quem prefere menos movimento vê o mesmo conteúdo, sem a animação. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-hero-in {
+  .bolha-opcao,
+  .bolha-opcao-simples,
+  .anel-procura,
+  .animate-up {
     animation: none;
+  }
+  .bolha-central:hover {
+    transform: none;
   }
 }
