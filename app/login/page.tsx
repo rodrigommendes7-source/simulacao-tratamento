@@ -163,8 +163,10 @@ export default function LoginPage() {
         </form>
 
         <p className="mu" style={{ fontSize: 12, marginTop: 16, lineHeight: 1.6 }}>
-          A conta fica guardada só neste dispositivo — não há servidor. Se limpar os dados do browser, ou entrar
-          noutro computador, terá de criar a conta de novo. Não use uma palavra-passe que use noutro sítio.
+          A conta e o histórico ficam no armazenamento local deste browser e não são enviados para nenhum
+          servidor — por isso, se limpar os dados do browser ou entrar noutro computador, terá de criar a conta
+          de novo. Não use uma palavra-passe que use noutro sítio. A app recolhe estatísticas anónimas de visitas
+          de página, que não incluem a sua conta nem as suas respostas.
         </p>
       </div>
     </div>

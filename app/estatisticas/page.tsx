@@ -52,7 +52,9 @@ export default function EstatisticasPage() {
           <div className="lbl">Ainda sem dados</div>
           <h2 className="h2" style={{ marginTop: 12 }}>Resolva o seu primeiro caso para começar a ver estatísticas.</h2>
           <p className="mu" style={{ fontSize: 13.5, marginTop: 10, maxWidth: "50ch", marginInline: "auto" }}>
-            O histórico fica guardado apenas neste dispositivo — não há conta nem comparação com outros alunos.
+            O seu histórico fica no armazenamento local deste browser e não é enviado para nenhum
+            servidor — ninguém o compara com o de outros alunos. A app recolhe estatísticas
+            anónimas de visitas de página, que não incluem nada do que resolve aqui.
           </p>
           <Link href="/casos" className="btn btn-p" style={{ marginTop: 20, display: "inline-flex" }}>
             Resolver um caso →
@@ -69,22 +71,22 @@ export default function EstatisticasPage() {
     <div className="animate-up">
       <h1 className="h1">Estatísticas</h1>
       <p className="mu" style={{ fontSize: 13, marginTop: 6 }}>
-        Histórico guardado neste dispositivo — sem conta, sem comparação com outros alunos.
+        Histórico guardado no armazenamento local deste browser, por conta. Não é comparado com o de outros alunos.
       </p>
 
       {/* 1. Resumo geral */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 16, marginTop: 20 }}>
+      <div className="grelha-4" style={{ marginTop: 20 }}>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Casos resolvidos</div>
           <div style={{ font: "800 34px/1 inherit", marginTop: 10 }}>{resumo.totalCasos}</div>
         </div>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Média geral</div>
-          <div style={{ font: "800 34px/1 inherit", marginTop: 10, color: ACC }}>{Math.round(resumo.mediaGeral)}</div>
+          <div style={{ font: "800 34px/1 inherit", marginTop: 10, color: ACC }}>{Math.round(resumo.mediaGeral)}%</div>
         </div>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Média — últimos {resumo.janelaRecente}</div>
-          <div style={{ font: "800 34px/1 inherit", marginTop: 10 }}>{Math.round(resumo.mediaRecente)}</div>
+          <div style={{ font: "800 34px/1 inherit", marginTop: 10 }}>{Math.round(resumo.mediaRecente)}%</div>
         </div>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Tendência</div>
@@ -124,7 +126,7 @@ export default function EstatisticasPage() {
             <div style={{ display: "flex", alignItems: "center" }}>
               <h3 className="h3">Identificação</h3>
               <span style={{ marginLeft: "auto", color: corPontuacao(porFase.identificacaoMedia ?? 0), fontWeight: 700 }}>
-                {porFase.identificacaoMedia !== null ? Math.round(porFase.identificacaoMedia) : "—"}
+                {porFase.identificacaoMedia !== null ? `${Math.round(porFase.identificacaoMedia)}%` : "—"}
               </span>
             </div>
             {porFase.identificacaoPorVariavel ? (
@@ -151,7 +153,7 @@ export default function EstatisticasPage() {
             <div style={{ display: "flex", alignItems: "center" }}>
               <h3 className="h3">Justificação</h3>
               <span style={{ marginLeft: "auto", color: porFase.justificacaoMedia !== null ? corPontuacao(porFase.justificacaoMedia) : "var(--label)", fontWeight: 700 }}>
-                {porFase.justificacaoMedia !== null ? Math.round(porFase.justificacaoMedia) : "—"}
+                {porFase.justificacaoMedia !== null ? `${Math.round(porFase.justificacaoMedia)}%` : "—"}
               </span>
             </div>
             <p className="mu" style={{ fontSize: 12, marginTop: 8 }}>
@@ -245,7 +247,7 @@ function BarraVariavel({ label, valor }: { label: string; valor: number }) {
     <div>
       <div style={{ display: "flex", fontSize: 12 }}>
         <span className="mu">{label}</span>
-        <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{Math.round(valor)}</span>
+        <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{Math.round(valor)}%</span>
       </div>
       <div className="bar" style={{ marginTop: 4, height: 5 }}>
         <div style={{ height: "100%", width: `${valor}%`, background: corPontuacao(valor) }} />

@@ -142,7 +142,14 @@ export function construirRespostaPerfeita(
     medidasCausais.gestaoDorConsiderada = true;
   }
 
-  return { tratamentosSelecionados, medidasCausais };
+  // Sem falsos positivos por construção: a resposta perfeita escolhe
+  // exatamente as categorias aplicáveis. É o que confirma que 100% continua
+  // alcançável depois de a precisão passar a contar.
+  const categoriasSelecionadas = decisao.categoriasAplicaveis.filter(
+    (categoria) => categoria !== "paliativos_oncologicos",
+  );
+
+  return { tratamentosSelecionados, categoriasSelecionadas, medidasCausais };
 }
 
 /** Produto cartesiano de N listas de opções — usado para enumeração exaustiva por categoria (secção 5). */

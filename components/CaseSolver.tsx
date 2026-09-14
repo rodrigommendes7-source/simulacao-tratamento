@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { TODOS_CASOS_TESTE } from "../dados/casosTeste";
 import { TODOS_TRATAMENTOS } from "../dados/tratamentos";
@@ -26,7 +27,23 @@ import {
   LABEL_NIVEL_INFECAO,
 } from "../lib/etiquetas";
 import { registarResultado } from "../lib/estado";
+import { propsAtivavel } from "../lib/acessibilidade";
+import {
+  apagarRascunho,
+  guardarRascunho,
+  lerRascunho,
+  rascunhoVazio,
+  versaoDadosDoCaso,
+  type RascunhoCaso,
+} from "../lib/rascunhoCaso";
+import {
+  dimensoesValidas,
+  pontoDaImagem,
+  pontoNoContentor,
+  type Dimensoes,
+} from "../lib/enquadramentoImagem";
 import { ACC, SEL, Grupo, ChipUnico, ChipMulti, alternarConjunto } from "./CamposClinicos";
+import { useDimensoesContentor } from "./useDimensoesContentor";
 import type {
   TipoTecido,
   ValorBordo,
@@ -95,6 +112,15 @@ export default function CaseSolver({ id }: { id: string }) {
   // Fase 2 — Identificação
   const [tecidoAtivo, setTecidoAtivo] = useState<TipoTecido | null>(null);
   const [pins, setPins] = useState<PinTecido[]>([]);
+  /**
+   * A fotografia é pintada com `object-fit: cover`, por isso parte dela fica
+   * cortada e as coordenadas do contentor não são as da imagem. Guardam-se as
+   * duas medidas para converter nos dois sentidos (ver
+   * lib/enquadramentoImagem.ts): o clique → coordenadas da imagem, e os pins
+   * já colocados → píxeis do contentor.
+   */
+  const { ref: refFotografia, dimensoes: dimensoesFotografia } = useDimensoesContentor<HTMLDivElement>();
+  const [naturalFotografia, setNaturalFotografia] = useState<Dimensoes | null>(null);
   const [exVol, setExVol] = useState<VolumeExsudado | null>(null);
   const [exTipo, setExTipo] = useState<Set<TipoExsudado>>(new Set());
   const [bordos, setBordos] = useState<Set<ValorBordo>>(new Set());
@@ -119,12 +145,83 @@ export default function CaseSolver({ id }: { id: string }) {
    * servidor e o cliente produzirem ordens diferentes.
    */
   const [ordemOpcoes, setOrdemOpcoes] = useState<Record<string, number[]>>({});
-  useEffect(() => {
-    setOrdemOpcoes(baralharBancoJustificacoes());
-  }, []);
 
   const [resultado, setResultado] = useState<ResultadoAvaliacao | null>(null);
   const [resultadoIdentificacao, setResultadoIdentificacao] = useState<ResultadoIdentificacao | null>(null);
+
+  // ─────────────────────────── Rascunho ───────────────────────────
+
+  /** Versão dos dados deste caso — muda se a ficha clínica ou a decisão mudarem. */
+  const versaoDados = useMemo(
+    () => (casoTeste && decisao ? versaoDadosDoCaso(casoTeste.caso, decisao) : ""),
+    [casoTeste, decisao],
+  );
+  /** Só se começa a gravar depois de ter lido o que já lá estava — senão o primeiro render escrevia um rascunho vazio por cima. */
+  const [rascunhoLido, setRascunhoLido] = useState(false);
+  /** Rascunho encontrado com uma versão de dados diferente: fica à espera da decisão do aluno. */
+  const [rascunhoDesatualizado, setRascunhoDesatualizado] = useState<RascunhoCaso | null>(null);
+
+  const aplicarRascunho = useCallback((r: RascunhoCaso) => {
+    setPhase(r.fase);
+    setTecidoAtivo(r.tecidoAtivo);
+    setPins(r.pins);
+    setExVol(r.exsudadoVolume);
+    setExTipo(new Set(r.exsudadoTipo));
+    setBordos(new Set(r.bordos));
+    setPele(new Set(r.pele));
+    setNivelInfecaoProposto(r.nivelInfecaoProposto);
+    setPerguntado(r.perguntado);
+    setCategorias(new Set(r.categorias));
+    setTecnicasSel(new Set(r.tecnicas));
+    setMedidas(r.medidas);
+    setJustRespostas(r.justRespostas);
+    if (Object.keys(r.ordemOpcoes ?? {}).length) setOrdemOpcoes(r.ordemOpcoes);
+  }, []);
+
+  // Carregamento: corre uma vez por caso. A ordem sorteada das justificações é
+  // gerada aqui (e não durante o render) porque é aleatória — o servidor e o
+  // cliente produziriam ordens diferentes; um rascunho guardado substitui-a.
+  useEffect(() => {
+    if (!casoTeste) return;
+    setOrdemOpcoes(baralharBancoJustificacoes());
+    const guardado = lerRascunho(casoTeste.id);
+    if (guardado) {
+      if (guardado.versaoDados === versaoDados) aplicarRascunho(guardado);
+      else setRascunhoDesatualizado(guardado);
+    }
+    setRascunhoLido(true);
+  }, [casoTeste, versaoDados, aplicarRascunho]);
+
+  // Gravação: a cada alteração, enquanto o caso não estiver submetido. Nada é
+  // escrito enquanto houver um conflito de versão por resolver — isso
+  // apagaria o rascunho antigo antes de o aluno escolher o que fazer com ele.
+  useEffect(() => {
+    if (!casoTeste || !rascunhoLido || rascunhoDesatualizado || screen !== "solve") return;
+    const rascunho: RascunhoCaso = {
+      versaoDados,
+      guardadoEm: new Date().toISOString(),
+      fase: phase,
+      tecidoAtivo,
+      pins,
+      exsudadoVolume: exVol,
+      exsudadoTipo: [...exTipo],
+      bordos: [...bordos],
+      pele: [...pele],
+      nivelInfecaoProposto,
+      perguntado,
+      categorias: [...categorias],
+      tecnicas: [...tecnicasSel],
+      medidas,
+      justRespostas,
+      ordemOpcoes,
+    };
+    if (rascunhoVazio(rascunho)) apagarRascunho(casoTeste.id);
+    else guardarRascunho(casoTeste.id, rascunho);
+  }, [
+    casoTeste, rascunhoLido, rascunhoDesatualizado, screen, versaoDados, phase, tecidoAtivo,
+    pins, exVol, exTipo, bordos, pele, nivelInfecaoProposto, perguntado, categorias,
+    tecnicasSel, medidas, justRespostas, ordemOpcoes,
+  ]);
 
   if (!casoTeste || !decisao) {
     return (
@@ -144,6 +241,33 @@ export default function CaseSolver({ id }: { id: string }) {
   /** A unidade de identificação é o tipo de tecido, não o pin: marcar duas manchas do mesmo tecido não vale mais do que marcar uma. */
   const tiposMarcados = new Set(pins.map((p) => p.tipo));
 
+  /** Já se sabe o suficiente para compensar o corte do `object-fit: cover`? */
+  const enquadramentoConhecido =
+    dimensoesValidas(dimensoesFotografia) && dimensoesValidas(naturalFotografia);
+
+  function aoClicarNaFotografia(e: React.MouseEvent<HTMLDivElement>) {
+    if (phase !== 2 || !tecidoAtivo) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const noContentor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const contentor = { largura: rect.width, altura: rect.height };
+    // Enquanto a imagem não carregou não há como saber o que está cortado;
+    // cai-se no mapeamento direto, que é o que se fazia antes.
+    const ponto = enquadramentoConhecido
+      ? pontoDaImagem(noContentor, contentor, naturalFotografia!)
+      : { x: noContentor.x / rect.width, y: noContentor.y / rect.height };
+    if (ponto.x < 0 || ponto.y < 0 || ponto.x > 1 || ponto.y > 1) return;
+    setPins((prev) => [...prev, { tipo: tecidoAtivo, x: ponto.x, y: ponto.y }]);
+  }
+
+  /** Posição de um pin na caixa visível — o inverso da conversão do clique. */
+  function posicaoDoPin(pin: PinTecido): { left: string; top: string } {
+    if (!enquadramentoConhecido) {
+      return { left: `${pin.x * 100}%`, top: `${pin.y * 100}%` };
+    }
+    const p = pontoNoContentor(pin, dimensoesFotografia!, naturalFotografia!);
+    return { left: `${p.x}px`, top: `${p.y}px` };
+  }
+
   const itensJustificacao = [
     ...[...categorias].map((cat) => ({ tipo: "tratamento" as const, key: `tr:${cat}`, id: cat, entrada: JUSTIFICACOES_TRATAMENTO[cat], titulo: LABEL_CATEGORIA[cat] })),
     ...[...tecnicasSel].map((id) => ({ tipo: "tecnica" as const, key: `tc:${id}`, id, entrada: JUSTIFICACOES_TECNICA[id], titulo: TODAS_TECNICAS.find((t) => t.id === id)?.nome ?? id })),
@@ -159,7 +283,15 @@ export default function CaseSolver({ id }: { id: string }) {
       const validos = decisao!.tratamentosValidos[cat];
       if (validos) tratamentosSelecionados.push(...validos.map((t) => t.id));
     }
-    const resposta: RespostaAluno = { tratamentosSelecionados, medidasCausais: medidas };
+    // `categoriasSelecionadas` inclui as que não se aplicam ao caso — é o que
+    // permite à avaliação descontar os falsos positivos; `tratamentosSelecionados`
+    // sozinho não os revela (uma categoria não aplicável não tem tratamentos
+    // válidos a acrescentar).
+    const resposta: RespostaAluno = {
+      tratamentosSelecionados,
+      categoriasSelecionadas: [...categorias],
+      medidasCausais: medidas,
+    };
     const r = avaliarResposta(caso, resposta);
 
     const respostaIdentificacao: RespostaIdentificacao = {
@@ -206,13 +338,18 @@ export default function CaseSolver({ id }: { id: string }) {
       correspondenciaJustificacoes,
       pontuacaoJustificacoes: arredondarPontuacao(pontuacaoJustificacoes(correspondenciaJustificacoes)),
     });
+    // O resultado passou a viver no histórico; o rascunho deixou de ter função.
+    apagarRascunho(casoTeste!.id);
     setScreen("result");
     window.scrollTo({ top: 0 });
   }
 
   if (screen === "result" && resultado && resultadoIdentificacao) {
     const categoriasCorretas = [...categorias].filter((c) => decisao.categoriasAplicaveis.includes(c));
-    const categoriasErradas = [...categorias].filter((c) => !decisao.categoriasAplicaveis.includes(c));
+    // A lista vem da própria avaliação, para o que se mostra aqui e o que
+    // desconta na pontuação não poderem divergir.
+    const categoriasErradas = resultado.falsosPositivos.categorias;
+    const descontoFalsosPositivos = Math.round(resultado.falsosPositivos.pontosDescontados);
     const categoriasFaltadas = decisao.categoriasAplicaveis.filter((c) => c !== "paliativos_oncologicos" && !categorias.has(c));
     const pontuacaoCombinada = (resultadoIdentificacao.pontuacaoFinalPercentual + resultado.pontuacaoFinalPercentual) / 2;
 
@@ -235,7 +372,7 @@ export default function CaseSolver({ id }: { id: string }) {
             ) : null}
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ font: "800 64px/1 inherit", color: "var(--accent)" }}>{Math.round(pontuacaoCombinada)}</div>
+            <div style={{ font: "800 64px/1 inherit", color: "var(--accent)" }}>{Math.round(pontuacaoCombinada)}%</div>
             <div className="lbl" style={{ marginTop: 8 }}>de 100 · média de identificação + plano terapêutico</div>
             <div className="bar" style={{ width: 200, marginTop: 12 }}>
               <div style={{ width: `${pontuacaoCombinada}%`, height: "100%", background: ACC }} />
@@ -243,7 +380,7 @@ export default function CaseSolver({ id }: { id: string }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+        <div className="grelha-2" style={{ marginTop: 16 }}>
           <div className="card" style={{ padding: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div className="lbl" style={{ color: "var(--success)" }}>Identificação</div>
@@ -285,7 +422,12 @@ export default function CaseSolver({ id }: { id: string }) {
             <div style={{ fontSize: 13, lineHeight: 1.8, marginTop: 8 }}>
               {categoriasCorretas.length ? <div style={{ color: "var(--success)" }}>✓ Acertou: {categoriasCorretas.map((c) => LABEL_CATEGORIA[c]).join(", ")}</div> : null}
               {categoriasFaltadas.length ? <div style={{ color: "var(--danger)" }}>✗ Faltou: {categoriasFaltadas.map((c) => LABEL_CATEGORIA[c]).join(", ")}</div> : null}
-              {categoriasErradas.length ? <div style={{ color: "var(--warning)" }}>~ Não indicado para este caso: {categoriasErradas.map((c) => LABEL_CATEGORIA[c]).join(", ")}</div> : null}
+              {categoriasErradas.length ? (
+                <div style={{ color: "var(--warning)" }}>
+                  ~ Não indicado para este caso: {categoriasErradas.map((c) => LABEL_CATEGORIA[c]).join(", ")}
+                  {descontoFalsosPositivos > 0 ? ` (−${descontoFalsosPositivos} pontos no plano)` : null}
+                </div>
+              ) : null}
               {!categoriasFaltadas.length && !categoriasErradas.length ? <div style={{ color: "var(--success)" }}>Selecionou exatamente as categorias indicadas.</div> : null}
             </div>
             {medidasItens.length ? (
@@ -311,13 +453,73 @@ export default function CaseSolver({ id }: { id: string }) {
 
   return (
     <div className="animate-up">
+      {/*
+        A ficha clínica deste caso mudou desde que o rascunho foi criado. As
+        marcações podem referir-se a polígonos que já não existem e as
+        categorias escolhidas podem já não ser as aplicáveis — mas quem sabe
+        isso é o aluno, não a aplicação: descartar em silêncio deitava fora
+        trabalho feito, e carregar em silêncio dava respostas que já não
+        correspondem ao caso. Pergunta-se.
+      */}
+      {rascunhoDesatualizado ? (
+        <div
+          className="card"
+          role="alertdialog"
+          aria-labelledby="rascunho-titulo"
+          style={{ padding: 20, marginBottom: 18, borderColor: "var(--warning)" }}
+        >
+          <div className="lbl" style={{ color: "var(--warning)" }}>Rascunho de uma versão anterior</div>
+          <h2 className="h2" id="rascunho-titulo" style={{ marginTop: 8 }}>
+            Este caso mudou desde que começou a resolvê-lo.
+          </h2>
+          <p className="mu" style={{ fontSize: 13.5, lineHeight: 1.6, margin: "10px 0 0", maxWidth: "62ch" }}>
+            Tem um rascunho de{" "}
+            {new Date(rascunhoDesatualizado.guardadoEm).toLocaleString("pt-PT")}, guardado sobre uma
+            versão anterior da ficha deste caso. Pode continuar de onde ficou — sabendo que algumas
+            escolhas podem já não corresponder ao que está agora na fotografia e no enunciado — ou
+            começar de novo.
+          </p>
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <button
+              className="btn btn-p"
+              onClick={() => {
+                aplicarRascunho(rascunhoDesatualizado);
+                setRascunhoDesatualizado(null);
+              }}
+            >
+              Continuar com o rascunho antigo
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                apagarRascunho(casoTeste.id);
+                setRascunhoDesatualizado(null);
+              }}
+            >
+              Recomeçar do zero
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
         <div>
           <div className="lbl">{casoTeste.titulo} · {LABEL_ETIOLOGIA[caso.etiologia]}</div>
           <h1 className="h1" style={{ marginTop: 9 }}>{FASES[phase - 1]}</h1>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-          <button className="btn" onClick={() => router.push("/casos")}>Guardar e sair</button>
+          <button
+            className="btn"
+            onClick={() => {
+              // O botão diz "sem guardar": tem de apagar também o que tinha
+              // sido gravado automaticamente até aqui.
+              apagarRascunho(casoTeste.id);
+              router.push("/casos");
+            }}
+            title="Apaga o que preencheu neste caso, incluindo o rascunho guardado automaticamente."
+          >
+            Sair sem guardar
+          </button>
         </div>
       </div>
 
@@ -344,8 +546,8 @@ export default function CaseSolver({ id }: { id: string }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.05fr) minmax(0,1fr)", gap: 20, marginTop: 20, alignItems: "start" }}>
-        <div className="card" style={{ padding: 18, position: "sticky", top: 96 }}>
+      <div className="grelha-2-larga" style={{ marginTop: 20 }}>
+        <div className="card foto-fixa" style={{ padding: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div className="lbl">Fotografia da ferida</div>
             {phase === 2 ? (
@@ -354,20 +556,40 @@ export default function CaseSolver({ id }: { id: string }) {
               </div>
             ) : null}
           </div>
-          <div
-            className="ph"
-            style={{ height: 360, marginTop: 14, position: "relative", cursor: phase === 2 && tecidoAtivo ? "crosshair" : "default" }}
-            onClick={(e) => {
-              if (phase !== 2 || !tecidoAtivo) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const x = (e.clientX - rect.left) / rect.width;
-              const y = (e.clientY - rect.top) / rect.height;
-              if (x < 0 || y < 0 || x > 1 || y > 1) return;
-              setPins((prev) => [...prev, { tipo: tecidoAtivo, x, y }]);
-            }}
-          >
-            {conteudo ? <img src={conteudo.fotografia} alt="" style={{ pointerEvents: "none" }} /> : "fotografia da ferida"}
-            {pins.map((pin, i) => (
+          <div className="ph" style={{ height: 360, marginTop: 14, position: "relative" }}>
+            {!conteudo ? "fotografia da ferida" : null}
+            {/*
+              Camada interior do tamanho exato da área pintada (a borda de
+              `.ph` não conta): é contra esta caixa que o clique é convertido
+              em coordenadas da imagem e que os pins são posicionados.
+            */}
+            <div
+              ref={refFotografia}
+              style={{
+                position: "absolute",
+                inset: 0,
+                cursor: phase === 2 && tecidoAtivo ? "crosshair" : "default",
+              }}
+              onClick={aoClicarNaFotografia}
+            >
+              {conteudo ? (
+                <Image
+                  src={conteudo.fotografia}
+                  alt=""
+                  fill
+                  sizes="(max-width: 900px) 100vw, 50vw"
+                  style={{ objectFit: "cover", pointerEvents: "none" }}
+                  onLoad={(e) =>
+                    setNaturalFotografia({
+                      largura: e.currentTarget.naturalWidth,
+                      altura: e.currentTarget.naturalHeight,
+                    })
+                  }
+                />
+              ) : null}
+              {pins.map((pin, i) => {
+              const posicao = posicaoDoPin(pin);
+              return (
               <div
                 key={i}
                 title={`${LABEL_TECIDO[pin.tipo]} — clique para remover`}
@@ -377,8 +599,8 @@ export default function CaseSolver({ id }: { id: string }) {
                 }}
                 style={{
                   position: "absolute",
-                  left: `${pin.x * 100}%`,
-                  top: `${pin.y * 100}%`,
+                  left: posicao.left,
+                  top: posicao.top,
                   transform: "translate(-50%,-50%)",
                   width: 26,
                   height: 26,
@@ -396,7 +618,9 @@ export default function CaseSolver({ id }: { id: string }) {
               >
                 {i + 1}
               </div>
-            ))}
+              );
+            })}
+            </div>
           </div>
           <div className="soft" style={{ marginTop: 14, padding: "14px 16px" }}>
             <div className="lbl">Contexto do doente</div>
@@ -501,7 +725,15 @@ export default function CaseSolver({ id }: { id: string }) {
                 {PERGUNTAS_DIALOGO.map((q, i) => {
                   const asked = !!perguntado[i];
                   return (
-                    <div key={q.tag} className="qa" onClick={() => { setPerguntado((p) => ({ ...p, [i]: true })); setAbertaPergunta(abertaPergunta === i && asked ? null : i); }}>
+                    <div
+                      key={q.tag}
+                      className="qa"
+                      aria-expanded={asked && abertaPergunta === i}
+                      {...propsAtivavel(() => {
+                        setPerguntado((p) => ({ ...p, [i]: true }));
+                        setAbertaPergunta(abertaPergunta === i && asked ? null : i);
+                      })}
+                    >
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div className="lbl" style={{ color: asked ? ACC : "var(--label)" }}>{q.tag}</div>
                         <div className="h3" style={{ flex: 1 }}>{q.pergunta}</div>
@@ -532,7 +764,10 @@ export default function CaseSolver({ id }: { id: string }) {
                   <h2 className="h2">Tratamento</h2>
                   <div className="lbl" style={{ marginLeft: "auto" }}>{categorias.size} escolhido(s)</div>
                 </div>
-                <p className="mu" style={{ fontSize: 13, margin: "8px 0 14px" }}>Categoria e mecanismo de ação.</p>
+                <p className="mu" style={{ fontSize: 13, margin: "8px 0 14px" }}>
+                  Categoria e mecanismo de ação. Escolha só as que se aplicam a esta ferida — uma
+                  categoria não indicada desconta metade do que vale acertar numa indicada.
+                </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {(Object.keys(LABEL_CATEGORIA) as CategoriaTratamento[]).map((cat) => {
                     const on = categorias.has(cat);
@@ -581,7 +816,8 @@ export default function CaseSolver({ id }: { id: string }) {
                 </div>
                 <p className="mu" style={{ fontSize: 13, margin: "8px 0 14px" }}>
                   Como se fixa e protege o penso. Pode escolher mais do que uma — cada técnica é avaliada
-                  pelas suas próprias condições, e várias podem ser válidas em conjunto.
+                  pelas suas próprias condições, e várias podem ser válidas em conjunto. Escolher uma
+                  técnica não indicada para este caso desconta pontos.
                 </p>
                 <div className="wrapchips">
                   {TODAS_TECNICAS.map((t) => (
@@ -616,7 +852,11 @@ export default function CaseSolver({ id }: { id: string }) {
                     const open = justAberto === item.key;
                     return (
                       <div key={item.key} className="qa">
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }} onClick={() => setJustAberto(open ? null : item.key)}>
+                        <div
+                          style={{ display: "flex", alignItems: "center", gap: 12 }}
+                          aria-expanded={open}
+                          {...propsAtivavel(() => setJustAberto(open ? null : item.key))}
+                        >
                           <div className="lbl" style={{ color: item.tipo === "tratamento" ? ACC : "var(--success)", flex: "none" }}>
                             {item.tipo === "tratamento" ? "Tratamento" : "Técnica"}
                           </div>

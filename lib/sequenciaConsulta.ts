@@ -239,14 +239,54 @@ export function construirPassos(respostas: RespostasConsulta): Passo[] {
   return passos;
 }
 
-/** Índice do primeiro passo ainda sem resposta; igual ao número de passos quando a sequência está completa. */
-export function indiceProximoPasso(passos: Passo[], respostas: RespostasConsulta): number {
-  const i = passos.findIndex((p) => respostas[p.id] === undefined);
+/**
+ * Conjunto dos passos múltiplos que o utilizador já deu por terminados.
+ *
+ * Só faz sentido para `multiplo: true`: num passo de escolha única a
+ * primeira escolha *é* a resposta, não há nada a confirmar.
+ */
+export type PassosConfirmados = ReadonlySet<IdPasso>;
+
+const SEM_CONFIRMACOES: PassosConfirmados = new Set<IdPasso>();
+
+/**
+ * Um passo está respondido — e portanto a sequência pode avançar para o
+ * seguinte?
+ *
+ * Num passo de escolha única basta haver escolha. Num passo múltiplo isso
+ * não chega: enquanto o critério foi "tem alguma resposta", a primeira
+ * opção clicada dava o passo por terminado e a sequência saltava logo para
+ * a variável seguinte — era impossível marcar uma segunda opção sem voltar
+ * atrás pelas "Escolhas feitas". Por isso um passo múltiplo só conta como
+ * respondido depois de confirmado explicitamente (a bolha central do
+ * SeletorCircular), o que também é o que torna alcançável o
+ * `infecao_local_covert`, que exige 2 sinais covert.
+ */
+export function passoRespondido(
+  passo: Passo,
+  respostas: RespostasConsulta,
+  confirmados: PassosConfirmados = SEM_CONFIRMACOES,
+): boolean {
+  if (respostas[passo.id] === undefined) return false;
+  return passo.multiplo ? confirmados.has(passo.id) : true;
+}
+
+/** Índice do primeiro passo ainda por responder; igual ao número de passos quando a sequência está completa. */
+export function indiceProximoPasso(
+  passos: Passo[],
+  respostas: RespostasConsulta,
+  confirmados: PassosConfirmados = SEM_CONFIRMACOES,
+): number {
+  const i = passos.findIndex((p) => !passoRespondido(p, respostas, confirmados));
   return i === -1 ? passos.length : i;
 }
 
-export function sequenciaCompleta(passos: Passo[], respostas: RespostasConsulta): boolean {
-  return indiceProximoPasso(passos, respostas) === passos.length;
+export function sequenciaCompleta(
+  passos: Passo[],
+  respostas: RespostasConsulta,
+  confirmados: PassosConfirmados = SEM_CONFIRMACOES,
+): boolean {
+  return indiceProximoPasso(passos, respostas, confirmados) === passos.length;
 }
 
 /**
@@ -261,4 +301,19 @@ export function limparRespostasObsoletas(passos: Passo[], respostas: RespostasCo
     if (validos.has(id as IdPasso)) limpas[id as IdPasso] = valor;
   }
   return limpas;
+}
+
+/**
+ * Descarta confirmações de passos que já não têm resposta — ou porque o
+ * passo desapareceu, ou porque a resposta foi limpa por
+ * `limparRespostasObsoletas`. Sem isto, baixar o volume de exsudado para
+ * "ausente" (que elimina `exsudado_tipo` e a sua resposta) e voltar a
+ * subi-lo deixava a confirmação antiga de pé, e o passo voltava a saltar ao
+ * primeiro clique. Recebe as respostas **já limpas**.
+ */
+export function limparConfirmacoesObsoletas(
+  respostas: RespostasConsulta,
+  confirmados: PassosConfirmados,
+): Set<IdPasso> {
+  return new Set([...confirmados].filter((id) => respostas[id] !== undefined));
 }

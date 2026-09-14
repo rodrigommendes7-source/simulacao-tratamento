@@ -1,5 +1,6 @@
 import { TODAS_TECNICAS } from "../dados/tecnicasAplicacao";
 import type { ContextoAvaliacao } from "./avaliarCondicao";
+import { PESO_FALSO_POSITIVO } from "./penalizacao";
 import { tecnicaValida } from "./tecnicaValida";
 
 /**
@@ -30,10 +31,30 @@ export function avaliarTecnicas(
   }));
 }
 
-/** Pontuação proporcional (recall sobre as técnicas esperadas) — mesmo princípio das categorias de tratamento em algoritmo/avaliarResposta.ts. 100 quando nenhuma técnica é esperada (vacuidade). */
+/**
+ * Pontuação proporcional das técnicas — mesmo princípio das categorias de
+ * tratamento em algoritmo/avaliarResposta.ts, incluindo a metade de precisão:
+ * recall sobre as técnicas esperadas, menos `PESO_FALSO_POSITIVO` unidades por
+ * cada técnica selecionada que não era esperada, com piso em 0.
+ *
+ * Só com recall, escolher as 6 técnicas dava 100 em qualquer caso — e o ecrã
+ * até convida a escolher mais do que uma ("cada técnica é avaliada pelas suas
+ * próprias condições"), o que tornava "escolher todas" a estratégia
+ * dominante. 100 continua a ser dado por vacuidade quando nenhuma técnica é
+ * esperada e nenhuma foi escolhida.
+ */
 export function pontuacaoTecnicas(correspondencias: CorrespondenciaTecnica[]): number {
   const esperadas = correspondencias.filter((c) => c.esperada);
-  if (esperadas.length === 0) return 100;
   const corretas = esperadas.filter((c) => c.selecionada).length;
-  return (corretas / esperadas.length) * 100;
+  const falsosPositivos = correspondencias.filter((c) => !c.esperada && c.selecionada).length;
+  const desconto = falsosPositivos * PESO_FALSO_POSITIVO;
+
+  if (esperadas.length === 0) {
+    // Vacuidade: nada era esperado, por isso não há denominador natural e a
+    // unidade vale os 100 pontos todos. Não escolher nada continua a valer
+    // 100; escolher à mesma custa meia unidade por técnica, para o caso sem
+    // técnica indicada não ser terreno livre.
+    return Math.max(0, 100 - desconto * 100);
+  }
+  return Math.max(0, ((corretas - desconto) / esperadas.length) * 100);
 }

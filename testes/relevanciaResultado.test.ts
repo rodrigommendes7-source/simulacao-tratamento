@@ -3,8 +3,14 @@ import { decidirCaso } from "../algoritmo/motorDecisao";
 import { avaliarCausaTratada } from "../algoritmo/causaTratada";
 import { categoriaRelevante, categoriasParaMostrar, mostrarNivelInfecao, sinaisInfecaoPreenchidos } from "../lib/relevanciaResultado";
 import { SINAIS_NEUTROS, casoDaConsulta } from "../lib/casoDaConsulta";
-import { construirPassos, indiceProximoPasso, limparRespostasObsoletas, sequenciaCompleta } from "../lib/sequenciaConsulta";
-import type { RespostasConsulta } from "../lib/sequenciaConsulta";
+import {
+  construirPassos,
+  indiceProximoPasso,
+  limparConfirmacoesObsoletas,
+  limparRespostasObsoletas,
+  sequenciaCompleta,
+} from "../lib/sequenciaConsulta";
+import type { IdPasso, RespostasConsulta } from "../lib/sequenciaConsulta";
 
 function resultado(respostas: RespostasConsulta) {
   const caso = casoDaConsulta(respostas);
@@ -166,18 +172,90 @@ describe("sequência guiada", () => {
 
   it("avança passo a passo e só fica completa no fim", () => {
     let respostas: RespostasConsulta = {};
+    let confirmados = new Set<IdPasso>();
     let passos = construirPassos(respostas);
-    expect(indiceProximoPasso(passos, respostas)).toBe(0);
-    expect(sequenciaCompleta(passos, respostas)).toBe(false);
+    expect(indiceProximoPasso(passos, respostas, confirmados)).toBe(0);
+    expect(sequenciaCompleta(passos, respostas, confirmados)).toBe(false);
 
     for (let guarda = 0; guarda < 20; guarda++) {
       passos = construirPassos(respostas);
-      const i = indiceProximoPasso(passos, respostas);
+      const i = indiceProximoPasso(passos, respostas, confirmados);
       if (i === passos.length) break;
       respostas = { ...respostas, [passos[i].id]: [passos[i].opcoes[0].valor] };
+      // Um passo múltiplo só avança depois de confirmado — é o gesto que o
+      // utilizador faz na bolha central.
+      if (passos[i].multiplo) confirmados = new Set(confirmados).add(passos[i].id);
     }
     passos = construirPassos(respostas);
-    expect(sequenciaCompleta(passos, respostas)).toBe(true);
+    expect(sequenciaCompleta(passos, respostas, confirmados)).toBe(true);
+  });
+
+  it("um passo múltiplo não avança na primeira escolha — só depois de confirmado", () => {
+    const respostas: RespostasConsulta = { etiologia: ["pressao"], tecidos: ["esfacelo"] };
+    const passos = construirPassos(respostas);
+    const iTecidos = passos.findIndex((p) => p.id === "tecidos");
+
+    // Com uma escolha feita mas sem confirmação, o passo atual continua a ser
+    // o próprio `tecidos` — é isto que permite marcar um segundo tecido.
+    expect(indiceProximoPasso(passos, respostas, new Set())).toBe(iTecidos);
+    expect(indiceProximoPasso(passos, respostas, new Set<IdPasso>(["tecidos"]))).toBe(iTecidos + 1);
+  });
+
+  it("um passo de escolha única continua a avançar sem confirmação", () => {
+    const passos = construirPassos({ etiologia: ["pressao"] });
+    // `etiologia` é single: uma escolha basta para a sequência seguir em frente.
+    expect(indiceProximoPasso(passos, { etiologia: ["pressao"] }, new Set())).toBe(1);
+    expect(passos[0].multiplo).toBe(false);
+  });
+
+  it("a confirmação de um passo cuja resposta foi descartada não sobrevive", () => {
+    // Volume "ausente" elimina `exsudado_tipo` e a sua resposta; a confirmação
+    // antiga não pode ficar de pé, senão o passo voltaria a saltar ao primeiro
+    // clique quando o volume subisse outra vez.
+    const antes: RespostasConsulta = {
+      etiologia: ["pressao"],
+      tecidos: ["esfacelo"],
+      exsudado_volume: ["moderado"],
+      exsudado_tipo: ["seroso"],
+    };
+    const depois = { ...antes, exsudado_volume: ["ausente"] };
+    const limpas = limparRespostasObsoletas(construirPassos(depois), depois);
+    expect(limpas.exsudado_tipo).toBeUndefined();
+
+    const confirmados = limparConfirmacoesObsoletas(
+      limpas,
+      new Set<IdPasso>(["tecidos", "exsudado_tipo"]),
+    );
+    expect([...confirmados]).toEqual(["tecidos"]);
+  });
+
+  it("permite marcar 2 sinais covert e chegar a infecao_local_covert sem voltar atrás", () => {
+    // Regressão do bug: com o avanço automático, `sinais_infecao` aceitava um
+    // único sinal e `infecao_local_covert` (≥2 covert) era inatingível.
+    let respostas: RespostasConsulta = {
+      etiologia: ["pressao"],
+      tecidos: ["granulacao"],
+      exsudado_volume: ["escasso"],
+      exsudado_tipo: ["seroso"],
+      bordos: ["aderentes_planos"],
+      pele: ["integra"],
+      profundidade: ["estadio_3"],
+      dor: ["2"],
+    };
+    const confirmados = new Set<IdPasso>(["tecidos", "exsudado_tipo", "bordos", "pele"]);
+    const passos = construirPassos(respostas);
+    const iSinais = passos.findIndex((p) => p.id === "sinais_infecao");
+
+    // Primeiro sinal: o passo tem de continuar a ser o dos sinais.
+    respostas = { ...respostas, sinais_infecao: ["dor_aumentada"] };
+    expect(indiceProximoPasso(construirPassos(respostas), respostas, confirmados)).toBe(iSinais);
+
+    // Segundo sinal, ainda no mesmo passo.
+    respostas = { ...respostas, sinais_infecao: ["dor_aumentada", "tecido_friavel"] };
+    expect(indiceProximoPasso(construirPassos(respostas), respostas, confirmados)).toBe(iSinais);
+
+    const caso = casoDaConsulta(respostas);
+    expect(decidirCaso(caso).nivelInfecao).toBe("infecao_local_covert");
   });
 
   it("mudar de etiologia vascular para pressão descarta o ABPI já respondido", () => {

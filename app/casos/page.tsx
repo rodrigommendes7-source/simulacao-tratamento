@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { TODOS_CASOS_TESTE } from "../../dados/casosTeste";
 import { decidirCaso } from "../../algoritmo/motorDecisao";
 import { LABEL_ETIOLOGIA } from "../../lib/etiquetas";
 import { CONTEUDO_POR_CASO, dificuldadeHeuristica } from "../../lib/casosContent";
 import { obterHistorico, type EntradaHistorico } from "../../lib/estado";
+import { propsAtivavel } from "../../lib/acessibilidade";
 import type { Etiologia } from "../../tipos/variaveis";
 
 export default function CasosPage() {
@@ -65,16 +67,26 @@ export default function CasosPage() {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, marginTop: 18 }}>
+      <div className="grelha-3" style={{ marginTop: 18 }}>
         {casosFiltrados.map((c) => {
           const decisao = decidirCaso(c.caso);
           const dificuldade = dificuldadeHeuristica(decisao.categoriasAplicaveis.length);
           const conteudo = CONTEUDO_POR_CASO[c.id];
           const melhor = melhorPorCaso.get(c.id);
           return (
-            <div key={c.id} className="tile card" style={{ padding: 16 }} onClick={() => router.push(`/casos/${c.id}`)}>
+            <div key={c.id} className="tile card" style={{ padding: 16 }} {...propsAtivavel(() => router.push(`/casos/${c.id}`))}>
               <div className="ph" style={{ height: 130 }}>
-                {conteudo ? <img src={conteudo.fotografia} alt="" /> : "fotografia da ferida"}
+                {conteudo ? (
+                  <Image
+                    src={conteudo.fotografia}
+                    alt=""
+                    fill
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    style={{ objectFit: "cover" }}
+                  />
+                ) : (
+                  "fotografia da ferida"
+                )}
               </div>
               <div className="wrapchips" style={{ marginTop: 14 }}>
                 <div className="chip" style={{ padding: "6px 11px", fontSize: 11.5, cursor: "default" }}>{LABEL_ETIOLOGIA[c.caso.etiologia]}</div>

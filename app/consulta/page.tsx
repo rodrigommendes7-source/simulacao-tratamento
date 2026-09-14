@@ -10,8 +10,10 @@ import { casoDaConsulta } from "../../lib/casoDaConsulta";
 import {
   construirPassos,
   indiceProximoPasso,
+  limparConfirmacoesObsoletas,
   limparRespostasObsoletas,
   sequenciaCompleta,
+  type IdPasso,
   type RespostasConsulta,
 } from "../../lib/sequenciaConsulta";
 import { obterConsultas, registarConsulta, type ConsultaHistorico } from "../../lib/consultas";
@@ -27,23 +29,31 @@ type Ecra = "sequencia" | "gerar" | "resultado";
 
 export default function ConsultaPage() {
   const [respostas, setRespostas] = useState<RespostasConsulta>({});
+  /**
+   * Passos múltiplos já dados por terminados. Um passo múltiplo com escolhas
+   * feitas mas por confirmar não faz a sequência avançar — é isso que
+   * permite marcar a segunda, terceira… opção (ver `passoRespondido`).
+   */
+  const [confirmados, setConfirmados] = useState<ReadonlySet<IdPasso>>(new Set());
   const [indiceForcado, setIndiceForcado] = useState<number | null>(null);
   const [ecra, setEcra] = useState<Ecra>("sequencia");
 
   const [consultas, setConsultas] = useState<ConsultaHistorico[]>([]);
   const [consultaRevisao, setConsultaRevisao] = useState<ConsultaHistorico | null>(null);
+  /** A consulta atual já foi guardada? Trava o botão e dá a confirmação no ecrã. */
+  const [guardada, setGuardada] = useState(false);
 
   useEffect(() => {
     setConsultas(obterConsultas());
   }, []);
 
   const passos = useMemo(() => construirPassos(respostas), [respostas]);
-  const indiceNatural = indiceProximoPasso(passos, respostas);
+  const indiceNatural = indiceProximoPasso(passos, respostas, confirmados);
   // Voltar atrás a um passo que entretanto desapareceu (mudar de etiologia
   // vascular remove o ABPI) deixaria o índice a apontar para fora da lista.
   const indiceAtual = indiceForcado !== null ? Math.min(indiceForcado, passos.length - 1) : indiceNatural;
   const passoAtual = passos[indiceAtual];
-  const completa = sequenciaCompleta(passos, respostas);
+  const completa = sequenciaCompleta(passos, respostas, confirmados);
 
   // Avaliação do caso em construção — tudo funções puras já existentes.
   const caso = useMemo(() => casoDaConsulta(respostas), [respostas]);
@@ -67,17 +77,26 @@ export default function ConsultaPage() {
 
   function alternar(valor: string) {
     if (!passoAtual) return;
-    setRespostas((prev) => {
-      const atuais = prev[passoAtual.id] ?? [];
-      const novos = passoAtual.multiplo
-        ? atuais.includes(valor)
-          ? atuais.filter((v) => v !== valor)
-          : [...atuais, valor]
-        : [valor];
-      const atualizadas = { ...prev, [passoAtual.id]: novos };
-      // Mudar uma resposta anterior pode fazer desaparecer passos seguintes
-      // (ex.: etiologia vascular → pressão elimina o ABPI).
-      return limparRespostasObsoletas(construirPassos(atualizadas), atualizadas);
+    const atuais = respostas[passoAtual.id] ?? [];
+    const novos = passoAtual.multiplo
+      ? atuais.includes(valor)
+        ? atuais.filter((v) => v !== valor)
+        : [...atuais, valor]
+      : [valor];
+    const comEscolha = { ...respostas, [passoAtual.id]: novos };
+    // Mudar uma resposta anterior pode fazer desaparecer passos seguintes
+    // (ex.: etiologia vascular → pressão elimina o ABPI).
+    const atualizadas = limparRespostasObsoletas(construirPassos(comEscolha), comEscolha);
+
+    setRespostas(atualizadas);
+    // Enquanto a seleção de um passo múltiplo está a mudar, ele volta a ficar
+    // por confirmar: é a confirmação explícita que o dá por respondido e faz
+    // avançar a sequência.
+    setConfirmados((prev) => {
+      const semEste = passoAtual.multiplo
+        ? new Set([...prev].filter((id) => id !== passoAtual.id))
+        : prev;
+      return limparConfirmacoesObsoletas(atualizadas, semEste);
     });
   }
 
@@ -86,6 +105,9 @@ export default function ConsultaPage() {
     // Um passo opcional sem escolhas fica registado como respondido em branco,
     // para a sequência avançar sem ficar presa neste passo.
     setRespostas((prev) => (prev[passoAtual.id] === undefined ? { ...prev, [passoAtual.id]: [] } : prev));
+    if (passoAtual.multiplo) {
+      setConfirmados((prev) => new Set(prev).add(passoAtual.id));
+    }
     setIndiceForcado(null);
   }
 
@@ -93,15 +115,26 @@ export default function ConsultaPage() {
 
   function recomecar() {
     setRespostas({});
+    setConfirmados(new Set());
     setIndiceForcado(null);
     setConsultaRevisao(null);
+    setGuardada(false);
     setEcra("sequencia");
     window.scrollTo({ top: 0 });
   }
 
+  /**
+   * Guardar a consulta atual. `guardada` trava o botão a seguir ao primeiro
+   * clique: sem isso, cada clique criava mais uma entrada idêntica no
+   * histórico, e como não havia confirmação nenhuma no ecrã era natural
+   * carregar outra vez a pensar que não tinha resultado. Volta a ficar
+   * disponível numa consulta nova (`recomecar`).
+   */
   function guardar() {
+    if (guardada) return;
     const nova = registarConsulta({ caso, decisao, tecnicas, causaTratada, portaoSistemico, oncologico });
     setConsultas((prev) => [...prev, nova]);
+    setGuardada(true);
   }
 
   // ── Consulta antiga em revisão: mostra-se o snapshot, sem recalcular ──
@@ -154,13 +187,22 @@ export default function ConsultaPage() {
             </p>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button className="btn" onClick={guardar}>Guardar consulta</button>
+            <button
+              className="btn"
+              onClick={guardar}
+              disabled={guardada}
+              aria-live="polite"
+              title={guardada ? "Já está no histórico, em baixo" : "Guardar esta consulta no histórico local"}
+            >
+              {guardada ? "Guardada ✓" : "Guardar consulta"}
+            </button>
             <button className="btn btn-p" onClick={recomecar}>Nova consulta</button>
           </div>
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <EscolhasFeitas passos={passos} respostas={respostas} indiceAtual={passos.length} onVoltarA={() => {}} />
+          {/* Só de leitura: no resultado não há passo para onde voltar. */}
+          <EscolhasFeitas passos={passos} respostas={respostas} indiceAtual={passos.length} />
         </div>
 
         <div style={{ marginTop: 16 }}>

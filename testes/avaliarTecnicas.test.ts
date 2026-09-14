@@ -36,7 +36,7 @@ describe("avaliarTecnicas", () => {
 });
 
 describe("pontuacaoTecnicas", () => {
-  it("100% quando não há nenhuma técnica esperada", () => {
+  it("100% quando não há nenhuma técnica esperada nem escolhida", () => {
     expect(pontuacaoTecnicas([{ tecnicaId: "x", esperada: false, selecionada: false }])).toBe(100);
   });
 
@@ -44,8 +44,47 @@ describe("pontuacaoTecnicas", () => {
     const correspondencias = [
       { tecnicaId: "a", esperada: true, selecionada: true },
       { tecnicaId: "b", esperada: true, selecionada: false },
-      { tecnicaId: "c", esperada: false, selecionada: true },
+      { tecnicaId: "c", esperada: false, selecionada: false },
     ];
     expect(pontuacaoTecnicas(correspondencias)).toBe(50);
+  });
+
+  it("desconta as técnicas escolhidas que não eram esperadas", () => {
+    // 2 esperadas, 2 acertadas, 1 escolhida a mais → (2 − 0,5)/2.
+    const correspondencias = [
+      { tecnicaId: "a", esperada: true, selecionada: true },
+      { tecnicaId: "b", esperada: true, selecionada: true },
+      { tecnicaId: "c", esperada: false, selecionada: true },
+    ];
+    expect(pontuacaoTecnicas(correspondencias)).toBe(75);
+  });
+
+  it("escolher tudo deixa de valer 100", () => {
+    const correspondencias = [
+      { tecnicaId: "a", esperada: true, selecionada: true },
+      { tecnicaId: "b", esperada: false, selecionada: true },
+      { tecnicaId: "c", esperada: false, selecionada: true },
+    ];
+    expect(pontuacaoTecnicas(correspondencias)).toBe(0);
+  });
+
+  it("nunca desce abaixo de 0", () => {
+    const correspondencias = [
+      { tecnicaId: "a", esperada: true, selecionada: false },
+      { tecnicaId: "b", esperada: false, selecionada: true },
+      { tecnicaId: "c", esperada: false, selecionada: true },
+    ];
+    expect(pontuacaoTecnicas(correspondencias)).toBe(0);
+  });
+
+  it("escolher técnicas onde nenhuma era indicada custa pontos", () => {
+    // Vacuidade: a unidade vale os 100 pontos, meia unidade tira 50.
+    expect(pontuacaoTecnicas([{ tecnicaId: "x", esperada: false, selecionada: true }])).toBe(50);
+    expect(
+      pontuacaoTecnicas([
+        { tecnicaId: "x", esperada: false, selecionada: true },
+        { tecnicaId: "y", esperada: false, selecionada: true },
+      ]),
+    ).toBe(0);
   });
 });

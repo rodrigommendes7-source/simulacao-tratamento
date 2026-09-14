@@ -3,9 +3,10 @@
 /**
  * Contas locais — nome de utilizador único + palavra-passe numérica.
  *
- * AVISO IMPORTANTE SOBRE O ÂMBITO: a aplicação não tem servidor. Isto não é
- * autenticação no sentido de segurança — é uma separação de perfis dentro de
- * um browser. Em concreto:
+ * AVISO IMPORTANTE SOBRE O ÂMBITO: não há servidor de contas — nada aqui sai
+ * do browser (a app contacta a rede para telemetria de visitas de página, que
+ * não tem nada que ver com isto). Isto não é autenticação no sentido de
+ * segurança — é uma separação de perfis dentro de um browser. Em concreto:
  *
  * - O "único" do nome de utilizador só vale neste browser. Duas pessoas em
  *   computadores diferentes podem registar o mesmo nome; não há nada que o

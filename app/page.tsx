@@ -6,6 +6,7 @@ import { TODOS_CASOS_TESTE } from "../dados/casosTeste";
 import { decidirCaso } from "../algoritmo/motorDecisao";
 import { LABEL_CATEGORIA } from "../lib/etiquetas";
 import { obterHistorico, mediaPontuacao, type EntradaHistorico } from "../lib/estado";
+import { propsAtivavel } from "../lib/acessibilidade";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -53,12 +54,12 @@ export default function DashboardPage() {
         </div>
         <div className="card" style={{ padding: "18px 22px", marginLeft: "auto" }}>
           <div className="lbl">Pontuação média</div>
-          <div style={{ font: "800 40px/1 inherit", color: "var(--accent)", marginTop: 8 }}>{media}</div>
+          <div style={{ font: "800 40px/1 inherit", color: "var(--accent)", marginTop: 8 }}>{media}%</div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, marginTop: 22 }}>
-        <div className="tile" style={{ background: "var(--accent)", color: "var(--accent-ink)" }} onClick={irParaCasoAleatorio}>
+      <div className="grelha-3" style={{ marginTop: 22 }}>
+        <div className="tile" style={{ background: "var(--accent)", color: "var(--accent-ink)" }} {...propsAtivavel(irParaCasoAleatorio)}>
           <div style={{ display: "flex" }}>
             <div className="lbl" style={{ color: "var(--accent-ink)" }}>Recomendado</div>
             <div style={{ marginLeft: "auto", fontSize: 18 }}>→</div>
@@ -68,7 +69,7 @@ export default function DashboardPage() {
           <div style={{ fontSize: 13, marginTop: 6 }}>Uma etiologia que ainda não resolveu</div>
         </div>
         {/* O texto deste tile é `--tile-alt-ink`, o par do fundo `--tile-alt`; `--accent-ink` é quase preto e só serve sobre o accent saturado. */}
-        <div className="tile" style={{ background: "var(--tile-alt)", color: "var(--tile-alt-ink)" }} onClick={() => router.push("/casos")}>
+        <div className="tile" style={{ background: "var(--tile-alt)", color: "var(--tile-alt-ink)" }} {...propsAtivavel(() => router.push("/casos"))}>
           <div style={{ display: "flex" }}>
             <div className="lbl" style={{ color: "var(--tile-alt-ink)" }}>Biblioteca</div>
             <div style={{ marginLeft: "auto", fontSize: 18 }}>→</div>
@@ -76,7 +77,7 @@ export default function DashboardPage() {
           <div style={{ marginTop: 52, fontSize: 20, fontWeight: 800, letterSpacing: "-.02em" }}>Escolher caso</div>
           <div style={{ fontSize: 13, marginTop: 6 }}>{TODOS_CASOS_TESTE.length} casos disponíveis</div>
         </div>
-        <div className="tile card" onClick={() => router.push("/estatisticas")}>
+        <div className="tile card" {...propsAtivavel(() => router.push("/estatisticas"))}>
           <div className="lbl">Progresso</div>
           <div style={{ marginTop: 14, display: "flex", gap: 22 }}>
             <div>
@@ -94,7 +95,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+      <div className="grelha-2-desigual" style={{ marginTop: 16 }}>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Desempenho por categoria de tratamento</div>
           {porCategoria.size === 0 ? (
@@ -109,7 +110,7 @@ export default function DashboardPage() {
                   <div key={categoria}>
                     <div style={{ display: "flex", fontSize: 13 }}>
                       <span>{LABEL_CATEGORIA[categoria as keyof typeof LABEL_CATEGORIA]}</span>
-                      <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{pct}</span>
+                      <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{pct}%</span>
                     </div>
                     <div className="bar" style={{ marginTop: 6 }}>
                       <div style={{ width: `${pct}%`, height: "100%", background: pct >= 70 ? "var(--accent)" : "var(--danger)" }} />

@@ -9,6 +9,11 @@ import type { Passo, RespostasConsulta } from "../../lib/sequenciaConsulta";
  * noção do que já respondeu; mostrar as escolhas por ordem devolve esse
  * contexto. Cada entrada é clicável para voltar atrás e corrigir — sem isso,
  * um engano no primeiro passo obrigaria a recomeçar tudo.
+ *
+ * Sem `onVoltarA` a lista é só de leitura: é o caso do ecrã de resultado, onde
+ * não há passo nenhum para onde voltar. Antes passava-se aí uma função vazia,
+ * e os chips continuavam a parecer botões — levantavam-se ao passar o rato,
+ * diziam "Voltar a este passo para corrigir" e não faziam nada.
  */
 export default function EscolhasFeitas({
   passos,
@@ -19,7 +24,7 @@ export default function EscolhasFeitas({
   passos: Passo[];
   respostas: RespostasConsulta;
   indiceAtual: number;
-  onVoltarA: (indice: number) => void;
+  onVoltarA?: (indice: number) => void;
 }) {
   const feitas = passos
     .map((passo, indice) => ({ passo, indice, valores: respostas[passo.id] }))
@@ -35,7 +40,16 @@ export default function EscolhasFeitas({
           const etiquetas = (valores ?? []).map(
             (v) => passo.opcoes.find((o) => o.valor === v)?.label ?? v,
           );
-          return (
+          const conteudo = (
+            <>
+              <span className="lbl">{passo.titulo}</span>
+              <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+                {etiquetas.length ? etiquetas.join(", ") : "não avaliado"}
+              </span>
+            </>
+          );
+
+          return onVoltarA ? (
             <button
               key={passo.id}
               className="chip"
@@ -43,11 +57,12 @@ export default function EscolhasFeitas({
               title="Voltar a este passo para corrigir"
               style={{ alignItems: "baseline" }}
             >
-              <span className="lbl">{passo.titulo}</span>
-              <span style={{ color: "var(--ink)", fontWeight: 600 }}>
-                {etiquetas.length ? etiquetas.join(", ") : "não avaliado"}
-              </span>
+              {conteudo}
             </button>
+          ) : (
+            <span key={passo.id} className="chip chip-estatico" style={{ alignItems: "baseline" }}>
+              {conteudo}
+            </span>
           );
         })}
       </div>

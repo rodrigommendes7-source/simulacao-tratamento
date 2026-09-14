@@ -38,8 +38,10 @@ export interface ResumoGeral {
 
 /**
  * Tendência = média dos últimos `n` casos vs. média histórica dos
- * restantes. "insuficiente" quando não há casos anteriores à janela
- * recente para comparar (menos de 2×n casos no total, com mínimo de 2).
+ * restantes. "insuficiente" enquanto sobrarem menos de 2 casos fora da
+ * janela recente — ou seja, até haver `n + 2` casos no total. Com menos do
+ * que isso a "média histórica" seria um ou nenhum caso, e a comparação não
+ * diria nada.
  */
 export function calcularResumoGeral(historicoBruto: EntradaHistorico[], n = 5): ResumoGeral {
   const historico = ordenarPorData(historicoBruto);

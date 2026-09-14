@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { jakarta, jetbrainsMono } from "./fonts";
 import AppShell from "../components/AppShell";
 import { SCRIPT_TEMA_INICIAL } from "../lib/tema";
@@ -34,6 +35,15 @@ export default function RootLayout({
         className={`${jakarta.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <AppShell>{children}</AppShell>
+        {/*
+          Analytics de audiência da Vercel — a dependência já estava no
+          package.json mas nunca tinha sido montada, por isso não fazia nada.
+          Mede visitas de páginas (sem cookies e sem identificar a pessoa) e
+          só envia alguma coisa quando o site corre na Vercel; em
+          desenvolvimento é inerte. Nada daqui toca no histórico do aluno, que
+          continua a viver só no localStorage do próprio browser.
+        */}
+        <Analytics />
       </body>
     </html>
   );

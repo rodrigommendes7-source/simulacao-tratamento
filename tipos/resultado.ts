@@ -32,6 +32,17 @@ export interface MedidasCausaisResposta {
 export interface RespostaAluno {
   /** IDs de EntradaTratamento (dados/tratamentos.ts) escolhidos, de qualquer categoria. */
   tratamentosSelecionados: string[];
+  /**
+   * Categorias que o aluno escolheu, incluindo as que não se aplicam ao caso.
+   *
+   * `tratamentosSelecionados` sozinho não dá para saber isto: uma categoria
+   * não aplicável não tem tratamentos válidos, por isso escolhê-la não
+   * acrescenta nenhum id à lista e passava despercebida à avaliação — era o
+   * que permitia ticar tudo sem custo. Opcional para não obrigar os
+   * chamadores informativos (Consulta pontual) a preenchê-la; ausente
+   * significa "sem falsos positivos a considerar".
+   */
+  categoriasSelecionadas?: CategoriaTratamento[];
   medidasCausais: MedidasCausaisResposta;
 }
 
@@ -75,6 +86,19 @@ export interface CorrespondenciaCategoria {
   pontuacaoPercentual: number | null;
 }
 
+/**
+ * Penalização por falsos positivos — categorias escolhidas que não se
+ * aplicam ao caso. Ver `algoritmo/avaliarResposta.ts`.
+ */
+export interface PenalizacaoFalsosPositivos {
+  /** Categorias escolhidas que não constam de `DecisaoCaso.categoriasAplicaveis`. */
+  categorias: CategoriaTratamento[];
+  /** Unidades de pontuação em jogo (categorias avaliáveis, ou dimensões no modelo oncológico). */
+  unidades: number;
+  /** Pontos descontados à pontuação base, já limitados pelo piso de 0. */
+  pontosDescontados: number;
+}
+
 /** Saída da avaliação de uma resposta de aluno para um caso concreto. */
 export interface ResultadoAvaliacao {
   decisao: DecisaoCaso;
@@ -82,6 +106,7 @@ export interface ResultadoAvaliacao {
   causaTratada?: ResultadoCausaTratada;
   oncologico?: ResultadoOncologico;
   portaoSistemico: ResultadoPortaoSistemico;
+  falsosPositivos: PenalizacaoFalsosPositivos;
   pontuacaoFinalPercentual: number;
   pontuacaoMaximaPossivel: number;
 }

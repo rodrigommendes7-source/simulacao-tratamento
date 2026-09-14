@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { obterUtilizador, sair } from "../lib/estado";
+import { obterConta } from "../lib/contas";
 import ThemeToggle from "./ThemeToggle";
 
 const NAV = [
@@ -18,6 +19,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [utilizador, setUtilizador] = useState<string | null>(null);
+  /**
+   * Como a pessoa escreveu o nome ("Ana Silva"), não a chave normalizada
+   * que nomeia o espaço de dados ("ana silva"). A conta guarda as duas
+   * (lib/contas.ts) precisamente para a interface poder mostrar a primeira.
+   */
+  const [nomeVisivel, setNomeVisivel] = useState<string | null>(null);
 
   useEffect(() => {
     const u = obterUtilizador();
@@ -26,6 +33,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     setUtilizador(u);
+    // Contas criadas antes de haver `nomeApresentacao`, ou um registo
+    // entretanto limpo, caem na chave — é sempre melhor do que ficar vazio.
+    setNomeVisivel(u ? (obterConta(u)?.nomeApresentacao ?? u) : null);
   }, [pathname, router]);
 
   if (pathname === "/login") return <>{children}</>;
@@ -43,14 +53,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           borderBottom: "1px solid var(--nav-line)",
         }}
       >
+        {/*
+          `flexWrap` + `gap`: em ecrãs estreitos a marca, a navegação e os
+          controlos passam a ocupar mais do que uma linha em vez de forçarem a
+          barra a ser mais larga do que o ecrã.
+        */}
         <div
+          className="barra-topo"
           style={{
             maxWidth: 1280,
             margin: "0 auto",
-            padding: "14px 26px",
             display: "flex",
             alignItems: "center",
-            gap: 22,
+            flexWrap: "wrap",
+            gap: 14,
           }}
         >
           <Link
@@ -75,7 +91,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             />
             Simulador
           </Link>
-          <nav className="nav">
+          <nav className="nav nav-principal">
             {NAV.map((n) => (
               <Link
                 key={n.href}
@@ -104,12 +120,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               }}
               title="Terminar sessão"
             >
-              {utilizador}
+              {nomeVisivel ?? utilizador}
             </button>
           </div>
         </div>
       </div>
-      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "30px 26px 0" }}>{children}</div>
+      <div className="conteudo" style={{ maxWidth: 1280, margin: "0 auto" }}>{children}</div>
     </div>
   );
 }
