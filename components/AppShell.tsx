@@ -3,9 +3,18 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { obterUtilizador, sair } from "../lib/estado";
-import { obterConta } from "../lib/contas";
+import { obterUtilizador, sair, type UtilizadorAtual } from "../lib/estado";
+import { limparDadosAntigos } from "../lib/dadosAntigos";
 import ThemeToggle from "./ThemeToggle";
+
+/**
+ * Páginas que se podem ver sem sessão iniciada.
+ *
+ * Renderizam sem a barra de navegação: os destinos dessa barra exigem sessão e
+ * levariam a pessoa direita ao ecrã de entrada. `/experimentar` é o test drive
+ * e traz a sua própria barra, mais curta.
+ */
+const PUBLICAS = ["/login", "/privacidade", "/experimentar"];
 
 const NAV = [
   { href: "/", label: "Início" },
@@ -18,28 +27,42 @@ const NAV = [
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [utilizador, setUtilizador] = useState<string | null>(null);
   /**
-   * Como a pessoa escreveu o nome ("Ana Silva"), não a chave normalizada
-   * que nomeia o espaço de dados ("ana silva"). A conta guarda as duas
-   * (lib/contas.ts) precisamente para a interface poder mostrar a primeira.
+   * O utilizador em sessão, tal como o servidor o devolve. Mostra-se o
+   * `nomeApresentacao` — como a pessoa escreveu o nome ("Ana Silva") — e não a
+   * forma canónica que garante a unicidade na base de dados ("ana silva").
    */
-  const [nomeVisivel, setNomeVisivel] = useState<string | null>(null);
+  const [utilizador, setUtilizador] = useState<UtilizadorAtual | null>(null);
+  /** Só há decisão de encaminhamento a tomar depois de o servidor responder. */
+  const [sessaoLida, setSessaoLida] = useState(false);
+  const [aviso, setAviso] = useState(false);
+
+  // Limpeza única do armazenamento da versão local, antes de mais nada. Se lá
+  // havia histórico, o aluno tem de saber por que razão desapareceu — ver
+  // lib/dadosAntigos.ts.
+  useEffect(() => {
+    setAviso(limparDadosAntigos().haviaDados);
+  }, []);
+
+  const publica = PUBLICAS.includes(pathname);
 
   useEffect(() => {
-    const u = obterUtilizador();
-    if (!u && pathname !== "/login") {
-      router.replace("/login");
-      return;
-    }
-    setUtilizador(u);
-    // Contas criadas antes de haver `nomeApresentacao`, ou um registo
-    // entretanto limpo, caem na chave — é sempre melhor do que ficar vazio.
-    setNomeVisivel(u ? (obterConta(u)?.nomeApresentacao ?? u) : null);
-  }, [pathname, router]);
+    let cancelado = false;
+    // A sessão é um cookie httpOnly: não é legível daqui, pergunta-se ao
+    // servidor. `cancelado` evita escrever estado depois de a rota mudar.
+    obterUtilizador().then((u) => {
+      if (cancelado) return;
+      setUtilizador(u);
+      setSessaoLida(true);
+      if (!u && !publica) router.replace("/login");
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [pathname, publica, router]);
 
-  if (pathname === "/login") return <>{children}</>;
-  if (!utilizador) return null;
+  if (publica) return <>{children}</>;
+  if (!sessaoLida || !utilizador) return null;
 
   return (
     <div style={{ minHeight: "100vh", paddingBottom: 70 }}>
@@ -114,18 +137,56 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 border: "1px solid var(--line)",
                 cursor: "pointer",
               }}
-              onClick={() => {
-                sair();
+              onClick={() => router.push("/conta")}
+              title="Gerir a conta"
+            >
+              {utilizador.nomeApresentacao}
+            </button>
+            <button
+              className="soft"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 999,
+                font: "500 12px/1 var(--font-jetbrains)",
+                color: "var(--muted)",
+                border: "1px solid var(--line)",
+                cursor: "pointer",
+              }}
+              onClick={async () => {
+                await sair();
                 router.replace("/login");
               }}
               title="Terminar sessão"
             >
-              {nomeVisivel ?? utilizador}
+              Sair
             </button>
           </div>
         </div>
       </div>
-      <div className="conteudo" style={{ maxWidth: 1280, margin: "0 auto" }}>{children}</div>
+      <div className="conteudo" style={{ maxWidth: 1280, margin: "0 auto" }}>
+        {aviso ? (
+          <div
+            className="card"
+            role="status"
+            style={{ padding: "14px 18px", marginBottom: 16, borderColor: "var(--warning)" }}
+          >
+            <div className="lbl">Mudámos a forma de guardar os dados</div>
+            <p className="mu" style={{ fontSize: 13, marginTop: 8, lineHeight: 1.6 }}>
+              Até agora, a conta e o histórico ficavam guardados apenas neste browser. Passaram a ficar na
+              sua conta, no servidor, para poder entrar a partir de qualquer computador. O que estava
+              guardado só neste browser não transitou — recomeça do zero, com a conta nova.{" "}
+              <Link href="/privacidade" style={{ color: "var(--accent)" }}>
+                Como tratamos os seus dados
+              </Link>
+              .
+            </p>
+            <button className="chip" style={{ marginTop: 10 }} onClick={() => setAviso(false)}>
+              Compreendi
+            </button>
+          </div>
+        ) : null}
+        {children}
+      </div>
     </div>
   );
 }

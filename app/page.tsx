@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TODOS_CASOS_TESTE } from "../dados/casosTeste";
-import { decidirCaso } from "../algoritmo/motorDecisao";
-import { LABEL_CATEGORIA } from "../lib/etiquetas";
+import { calcularDesempenhoTratamentos } from "../lib/estatisticas";
+import { escolherProximoCaso } from "../lib/proximoCaso";
+import { textoBoasVindas } from "../lib/boasVindas";
+import { LIMIAR_BOM_DESEMPENHO } from "../lib/pontuacao";
 import { obterHistorico, mediaPontuacao, type EntradaHistorico } from "../lib/estado";
 import { propsAtivavel } from "../lib/acessibilidade";
 
@@ -13,49 +15,76 @@ export default function DashboardPage() {
   const [historico, setHistorico] = useState<EntradaHistorico[]>([]);
 
   useEffect(() => {
-    setHistorico(obterHistorico());
+    // O histórico vem do servidor. Falhar aqui deixa o ecrã no estado de quem
+    // ainda não resolveu nada — o AppShell trata do caso de não haver sessão.
+    obterHistorico()
+      .then(setHistorico)
+      .catch(() => setHistorico([]));
   }, []);
 
   const media = mediaPontuacao(historico);
   const resolvidos = new Set(historico.map((h) => h.casoId));
   const etiologiasCobertas = new Set(historico.map((h) => h.etiologia));
 
+  /** A ordem de preferência e os seus recuos vivem em lib/proximoCaso.ts, para poderem ser testados. */
   function irParaCasoAleatorio() {
-    const disponiveis = TODOS_CASOS_TESTE.filter((c) => !resolvidos.has(c.id));
-    const lista = disponiveis.length ? disponiveis : TODOS_CASOS_TESTE;
-    const escolhido = lista[Math.floor(Math.random() * lista.length)];
-    router.push(`/casos/${escolhido.id}`);
+    const escolhido = escolherProximoCaso(TODOS_CASOS_TESTE, historico);
+    if (escolhido) router.push(`/casos/${escolhido.id}`);
   }
 
-  // Desempenho por categoria de tratamento, a partir do histórico real do aluno.
-  const porCategoria = new Map<string, { acertos: number; total: number }>();
-  for (const h of historico) {
-    const c = TODOS_CASOS_TESTE.find((x) => x.id === h.casoId);
-    if (!c) continue;
-    const decisao = decidirCaso(c.caso);
-    for (const categoria of decisao.categoriasAplicaveis) {
-      const atual = porCategoria.get(categoria) ?? { acertos: 0, total: 0 };
-      atual.total += 1;
-      if (h.pontuacaoFinal >= 70) atual.acertos += 1;
-      porCategoria.set(categoria, atual);
-    }
-  }
+  /**
+   * Desempenho por categoria de tratamento.
+   *
+   * Usa a mesma função que alimenta o ecrã de Estatísticas, e por duas razões.
+   *
+   * A primeira é correção: este bloco atribuía a `pontuacaoFinal` do caso a
+   * todas as categorias aplicáveis, pelo que um aluno com 75 % aparecia com
+   * 100 % em todas — inclusive naquela que tinha errado por completo e
+   * compensado nas outras. O painel cuja função é dizer onde se está fraco era
+   * o que menos o conseguia dizer. A pontuação real por categoria já vinha
+   * gravada no histórico (`correspondenciaTratamento`, uma entrada por
+   * categoria aplicável com a sua própria percentagem); faltava lê-la.
+   *
+   * A segunda é que o cálculo antigo chamava `decidirCaso` para redescobrir as
+   * categorias aplicáveis — ou seja, aplicava as regras clínicas de hoje a
+   * respostas avaliadas com as regras de então. Agregar o que foi gravado é o
+   * que a coluna `versao_regras` existe para tornar possível.
+   *
+   * Mostram-se só as categorias que o aluno já encontrou. `taxaAcerto` a
+   * `null` significa ausência de dado, nunca zero: um caso sem detalhe para
+   * uma categoria não pode puxar a média dela para baixo.
+   */
+  const desempenhoCategorias = useMemo(
+    () =>
+      calcularDesempenhoTratamentos(historico).filter(
+        (d) => d.tipo === "categoria" && d.tentativas > 0 && d.taxaAcerto !== null,
+      ),
+    [historico],
+  );
+
+  /** Etiqueta, título e estados vazios do cabeçalho — tabela de decisão em lib/boasVindas.ts. */
+  const boasVindas = textoBoasVindas(historico, media);
 
   return (
     <div className="animate-up">
       <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
         <div>
-          <div className="lbl">Bem-vindo(a) de volta</div>
+          <div className="lbl">{boasVindas.etiqueta}</div>
           <h1 className="h1" style={{ marginTop: 10 }}>
-            {resolvidos.size} caso(s) resolvido(s).
-            <br />
-            {media >= 70 ? "Bom desempenho até agora." : "Continue a praticar."}
+            {boasVindas.titulo.map((linha, i) => (
+              <span key={linha}>
+                {i > 0 ? <br /> : null}
+                {linha}
+              </span>
+            ))}
           </h1>
         </div>
-        <div className="card" style={{ padding: "18px 22px", marginLeft: "auto" }}>
-          <div className="lbl">Pontuação média</div>
-          <div style={{ font: "800 40px/1 inherit", color: "var(--accent)", marginTop: 8 }}>{media}%</div>
-        </div>
+        {boasVindas.mostrarMedia ? (
+          <div className="card" style={{ padding: "18px 22px", marginLeft: "auto" }}>
+            <div className="lbl">Pontuação média</div>
+            <div style={{ font: "800 40px/1 inherit", color: "var(--accent)", marginTop: 8 }}>{media}%</div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grelha-3" style={{ marginTop: 22 }}>
@@ -66,7 +95,7 @@ export default function DashboardPage() {
           </div>
           <div style={{ marginTop: 52, fontSize: 20, fontWeight: 800, letterSpacing: "-.02em" }}>Caso aleatório</div>
           {/* Sem opacity: a hierarquia já vem do tamanho e do peso, e esbater o texto sobre um fundo saturado deixava-o abaixo do mínimo legível. */}
-          <div style={{ fontSize: 13, marginTop: 6 }}>Uma etiologia que ainda não resolveu</div>
+          <div style={{ fontSize: 13, marginTop: 6 }}>{boasVindas.subtituloCasoAleatorio}</div>
         </div>
         {/* O texto deste tile é `--tile-alt-ink`, o par do fundo `--tile-alt`; `--accent-ink` é quase preto e só serve sobre o accent saturado. */}
         <div className="tile" style={{ background: "var(--tile-alt)", color: "var(--tile-alt-ink)" }} {...propsAtivavel(() => router.push("/casos"))}>
@@ -98,22 +127,29 @@ export default function DashboardPage() {
       <div className="grelha-2-desigual" style={{ marginTop: 16 }}>
         <div className="card" style={{ padding: 20 }}>
           <div className="lbl">Desempenho por categoria de tratamento</div>
-          {porCategoria.size === 0 ? (
+          {desempenhoCategorias.length === 0 ? (
             <div className="mu" style={{ fontSize: 13, marginTop: 14 }}>
               Resolva casos para ver o seu desempenho por categoria.
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-              {[...porCategoria.entries()].map(([categoria, v]) => {
-                const pct = Math.round((v.acertos / v.total) * 100);
+              {desempenhoCategorias.map((d) => {
+                // O filtro acima já garantiu que não é null.
+                const pct = Math.round(d.taxaAcerto as number);
                 return (
-                  <div key={categoria}>
+                  <div key={d.id}>
                     <div style={{ display: "flex", fontSize: 13 }}>
-                      <span>{LABEL_CATEGORIA[categoria as keyof typeof LABEL_CATEGORIA]}</span>
+                      <span>{d.label}</span>
                       <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{pct}%</span>
                     </div>
                     <div className="bar" style={{ marginTop: 6 }}>
-                      <div style={{ width: `${pct}%`, height: "100%", background: pct >= 70 ? "var(--accent)" : "var(--danger)" }} />
+                      <div
+                        style={{
+                          width: `${pct}%`,
+                          height: "100%",
+                          background: pct >= LIMIAR_BOM_DESEMPENHO ? "var(--accent)" : "var(--danger)",
+                        }}
+                      />
                     </div>
                   </div>
                 );

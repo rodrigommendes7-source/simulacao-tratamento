@@ -41,7 +41,7 @@ export default function RootLayout({
           Mede visitas de páginas (sem cookies e sem identificar a pessoa) e
           só envia alguma coisa quando o site corre na Vercel; em
           desenvolvimento é inerte. Nada daqui toca no histórico do aluno, que
-          continua a viver só no localStorage do próprio browser.
+          vive na base de dados associado à conta e nunca passa por aqui.
         */}
         <Analytics />
       </body>

@@ -42,9 +42,14 @@ export default function ConsultaPage() {
   const [consultaRevisao, setConsultaRevisao] = useState<ConsultaHistorico | null>(null);
   /** A consulta atual já foi guardada? Trava o botão e dá a confirmação no ecrã. */
   const [guardada, setGuardada] = useState(false);
+  const [erroGuardar, setErroGuardar] = useState<string | null>(null);
 
   useEffect(() => {
-    setConsultas(obterConsultas());
+    // As consultas guardadas vêm do servidor; falhar aqui mostra a lista
+    // vazia, que é o mesmo que ver quem ainda não guardou nenhuma.
+    obterConsultas()
+      .then(setConsultas)
+      .catch(() => setConsultas([]));
   }, []);
 
   const passos = useMemo(() => construirPassos(respostas), [respostas]);
@@ -119,6 +124,7 @@ export default function ConsultaPage() {
     setIndiceForcado(null);
     setConsultaRevisao(null);
     setGuardada(false);
+    setErroGuardar(null);
     setEcra("sequencia");
     window.scrollTo({ top: 0 });
   }
@@ -129,12 +135,23 @@ export default function ConsultaPage() {
    * histórico, e como não havia confirmação nenhuma no ecrã era natural
    * carregar outra vez a pensar que não tinha resultado. Volta a ficar
    * disponível numa consulta nova (`recomecar`).
+   *
+   * O `guardada` é marcado antes de ir ao servidor, para travar um segundo
+   * clique enquanto o pedido está a caminho, e é desmarcado se a gravação
+   * falhar — dizer "Guardada ✓" sobre uma consulta que não chegou a ser
+   * gravada seria a pior das saídas.
    */
-  function guardar() {
+  async function guardar() {
     if (guardada) return;
-    const nova = registarConsulta({ caso, decisao, tecnicas, causaTratada, portaoSistemico, oncologico });
-    setConsultas((prev) => [...prev, nova]);
     setGuardada(true);
+    setErroGuardar(null);
+    try {
+      const nova = await registarConsulta({ caso, decisao, tecnicas, causaTratada, portaoSistemico, oncologico });
+      setConsultas((prev) => [...prev, nova]);
+    } catch {
+      setGuardada(false);
+      setErroGuardar("Não foi possível guardar a consulta. Tente outra vez.");
+    }
   }
 
   // ── Consulta antiga em revisão: mostra-se o snapshot, sem recalcular ──
@@ -192,13 +209,17 @@ export default function ConsultaPage() {
               onClick={guardar}
               disabled={guardada}
               aria-live="polite"
-              title={guardada ? "Já está no histórico, em baixo" : "Guardar esta consulta no histórico local"}
+              title={guardada ? "Já está no histórico, em baixo" : "Guardar esta consulta no seu histórico"}
             >
               {guardada ? "Guardada ✓" : "Guardar consulta"}
             </button>
             <button className="btn btn-p" onClick={recomecar}>Nova consulta</button>
           </div>
         </div>
+
+        {erroGuardar ? (
+          <div role="alert" style={{ color: "var(--danger)", fontSize: 12.5, marginTop: 10 }}>{erroGuardar}</div>
+        ) : null}
 
         <div style={{ marginTop: 16 }}>
           {/* Só de leitura: no resultado não há passo para onde voltar. */}

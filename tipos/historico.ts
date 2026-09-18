@@ -15,8 +15,9 @@ export interface DesempenhoIdentificacaoResumo {
 }
 
 /**
- * Uma entrada de histórico por caso resolvido — guardada localmente
- * (localStorage, ver lib/estado.ts). Guarda os resultados já devolvidos
+ * Uma entrada de histórico por caso resolvido — guardada na conta do aluno,
+ * na base de dados (ver lib/estado.ts e app/api/resultados/route.ts), com a
+ * versão das regras clínicas usadas ao lado. Guarda os resultados já devolvidos
  * pelo motor de decisão (algoritmo/avaliarResposta.ts,
  * algoritmo/avaliarIdentificacao.ts, algoritmo/avaliarTecnicas.ts,
  * algoritmo/avaliarJustificacoes.ts) tal como foram calculados no momento

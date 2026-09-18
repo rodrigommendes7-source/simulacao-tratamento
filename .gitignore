@@ -17,7 +17,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files — .env.example É versionado de propósito: documenta as
+# variáveis necessárias (DATABASE_URL, SEGREDO_SESSAO) sem conter valores.
 .env*.local
 
 # typescript

@@ -1,98 +1,104 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ConsultaHistorico } from "../lib/consultas";
 
 /**
- * lib/consultas.ts é "use client" e lê window.localStorage — o ambiente de
- * testes por omissão deste projeto é "node" (sem DOM), por isso simulamos
- * aqui um localStorage mínimo em memória, tal como o browser o exporia.
+ * `lib/consultas.ts` deixou de escrever no `localStorage` e passou a falar com
+ * `/api/consultas`. Estes testes simulam o `fetch` e verificam o contrato do
+ * lado do cliente: que rota é chamada, com que método, e o que se faz com a
+ * resposta.
+ *
+ * O que **não** se testa aqui é a gravação em si — isso é a rota de API e a
+ * base de dados, e simular um Postgres para o afirmar não provaria nada.
  */
-function instalarLocalStorageFalso() {
-  const armazenamento = new Map<string, string>();
-  const localStorageFalso = {
-    getItem: (chave: string) => (armazenamento.has(chave) ? armazenamento.get(chave)! : null),
-    setItem: (chave: string, valor: string) => {
-      armazenamento.set(chave, valor);
-    },
-    removeItem: (chave: string) => {
-      armazenamento.delete(chave);
-    },
-    clear: () => armazenamento.clear(),
-  };
-  vi.stubGlobal("window", { localStorage: localStorageFalso });
-  return localStorageFalso;
+interface ChamadaFetch {
+  url: string;
+  opcoes: RequestInit;
 }
 
-describe("lib/consultas.ts (histórico local de consultas pontuais)", () => {
+function instalarFetchFalso(respostas: Record<string, unknown>) {
+  const chamadas: ChamadaFetch[] = [];
+  vi.stubGlobal("fetch", (url: string, opcoes: RequestInit = {}) => {
+    chamadas.push({ url, opcoes });
+    const chave = `${opcoes.method ?? "GET"} ${url}`;
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(respostas[chave] ?? {}),
+    } as Response);
+  });
+  return chamadas;
+}
+
+const ENTRADA = {
+  caso: { etiologia: "venosa" },
+  decisao: { categoriasAplicaveis: [] },
+  tecnicas: [],
+  causaTratada: {},
+  portaoSistemico: {},
+} as unknown as Omit<ConsultaHistorico, "id" | "data">;
+
+describe("lib/consultas.ts (histórico de consultas na conta)", () => {
   beforeEach(() => {
     vi.resetModules();
-    instalarLocalStorageFalso();
+    vi.unstubAllGlobals();
   });
 
-  it("começa vazio quando não há nada guardado", async () => {
+  it("lê as consultas da rota, tal como o servidor as devolve", async () => {
+    const guardada = { ...ENTRADA, id: "abc", data: "2026-01-01T10:00:00.000Z" };
+    instalarFetchFalso({ "GET /api/consultas": { consultas: [guardada] } });
+
     const { obterConsultas } = await import("../lib/consultas");
-    expect(obterConsultas()).toEqual([]);
+    expect(await obterConsultas()).toEqual([guardada]);
   });
 
-  it("regista uma consulta e atribui id e data automaticamente", async () => {
-    const { obterConsultas, registarConsulta } = await import("../lib/consultas");
-    const entrada = {
-      caso: { etiologia: "venosa" } as never,
-      decisao: { nivelInfecao: "sem_sinais", categoriasAplicaveis: [], tratamentosValidos: {} } as never,
-      tecnicas: [],
-      causaTratada: { aplicavel: false } as never,
-      portaoSistemico: { aplicavel: false } as never,
-    };
-    const guardada = registarConsulta(entrada);
-    expect(guardada.id).toBeTruthy();
-    expect(guardada.data).toBeTruthy();
-
-    const todas = obterConsultas();
-    expect(todas).toHaveLength(1);
-    expect(todas[0].id).toBe(guardada.id);
+  it("começa vazio quando a conta ainda não tem consultas", async () => {
+    instalarFetchFalso({ "GET /api/consultas": { consultas: [] } });
+    const { obterConsultas } = await import("../lib/consultas");
+    expect(await obterConsultas()).toEqual([]);
   });
 
-  it("acumula várias consultas em ordem de registo", async () => {
-    const { obterConsultas, registarConsulta } = await import("../lib/consultas");
-    const base = {
-      caso: { etiologia: "venosa" } as never,
-      decisao: { nivelInfecao: "sem_sinais", categoriasAplicaveis: [], tratamentosValidos: {} } as never,
-      tecnicas: [],
-      causaTratada: { aplicavel: false } as never,
-      portaoSistemico: { aplicavel: false } as never,
-    };
-    registarConsulta(base);
-    registarConsulta({ ...base, caso: { etiologia: "pressao" } as never });
-    const todas = obterConsultas();
-    expect(todas).toHaveLength(2);
-    expect(todas[0].caso.etiologia).toBe("venosa");
-    expect(todas[1].caso.etiologia).toBe("pressao");
+  it("grava com POST e devolve a consulta com o id que o servidor atribuiu", async () => {
+    // O id e a data vêm da base de dados, não do cliente: é a base de dados
+    // que os atribui, e é por eles que a interface identifica a consulta.
+    const criada = { ...ENTRADA, id: "gerado-pelo-servidor", data: "2026-01-01T10:00:00.000Z" };
+    const chamadas = instalarFetchFalso({ "POST /api/consultas": { consulta: criada } });
+
+    const { registarConsulta } = await import("../lib/consultas");
+    const resultado = await registarConsulta(ENTRADA);
+
+    expect(resultado).toEqual(criada);
+    expect(chamadas[0].url).toBe("/api/consultas");
+    expect(chamadas[0].opcoes.method).toBe("POST");
+    expect(JSON.parse(chamadas[0].opcoes.body as string)).toEqual({ entrada: ENTRADA });
   });
 
-  it("cada consulta guardada preserva o snapshot completo passado (decisão incluída)", async () => {
-    const { obterConsultas, registarConsulta } = await import("../lib/consultas");
-    const decisaoSnapshot = { nivelInfecao: "infecao_local_overt", categoriasAplicaveis: ["antimicrobianos"], tratamentosValidos: {} } as never;
-    registarConsulta({
-      caso: { etiologia: "venosa" } as never,
-      decisao: decisaoSnapshot,
-      tecnicas: [{ tecnicaId: "penso_rapido", esperada: false, selecionada: false }],
-      causaTratada: { aplicavel: true, itemPresente: false, tetoPontuacao: 40 } as never,
-      portaoSistemico: { aplicavel: false } as never,
-    });
-    const [guardada] = obterConsultas();
-    expect(guardada.decisao).toEqual(decisaoSnapshot);
-    expect(guardada.causaTratada).toEqual({ aplicavel: true, itemPresente: false, tetoPontuacao: 40 });
+  it("envia o instantâneo completo, sem o resumir", async () => {
+    // Reabrir uma consulta antiga tem de mostrar o que foi calculado nessa
+    // altura. Se o cliente só enviasse parte, não havia como o reconstruir.
+    const chamadas = instalarFetchFalso({ "POST /api/consultas": { consulta: { ...ENTRADA, id: "x", data: "d" } } });
+    const { registarConsulta } = await import("../lib/consultas");
+    await registarConsulta(ENTRADA);
+
+    const enviado = JSON.parse(chamadas[0].opcoes.body as string).entrada;
+    expect(Object.keys(enviado).sort()).toEqual(Object.keys(ENTRADA).sort());
   });
 
-  it("limparConsultas esvazia o histórico", async () => {
-    const { obterConsultas, registarConsulta, limparConsultas } = await import("../lib/consultas");
-    registarConsulta({
-      caso: { etiologia: "venosa" } as never,
-      decisao: { nivelInfecao: "sem_sinais", categoriasAplicaveis: [], tratamentosValidos: {} } as never,
-      tecnicas: [],
-      causaTratada: { aplicavel: false } as never,
-      portaoSistemico: { aplicavel: false } as never,
-    });
-    expect(obterConsultas()).toHaveLength(1);
-    limparConsultas();
-    expect(obterConsultas()).toEqual([]);
+  it("limparConsultas usa DELETE na mesma rota", async () => {
+    const chamadas = instalarFetchFalso({ "DELETE /api/consultas": { ok: true } });
+    const { limparConsultas } = await import("../lib/consultas");
+    await limparConsultas();
+
+    expect(chamadas[0].url).toBe("/api/consultas");
+    expect(chamadas[0].opcoes.method).toBe("DELETE");
+  });
+
+  it("envia o cookie de sessão em todos os pedidos", async () => {
+    // O cookie é httpOnly e é o browser que o envia — mas só se o pedido for
+    // feito com credenciais. Sem isto, todos os pedidos davam 401.
+    const chamadas = instalarFetchFalso({ "GET /api/consultas": { consultas: [] } });
+    const { obterConsultas } = await import("../lib/consultas");
+    await obterConsultas();
+
+    expect(chamadas[0].opcoes.credentials).toBe("same-origin");
   });
 });

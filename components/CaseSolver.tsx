@@ -27,6 +27,7 @@ import {
   LABEL_NIVEL_INFECAO,
 } from "../lib/etiquetas";
 import { registarResultado } from "../lib/estado";
+import { ORIGEM_TEST_DRIVE, guardarTentativa, limparTentativa } from "../lib/testDrive";
 import { propsAtivavel } from "../lib/acessibilidade";
 import {
   apagarRascunho,
@@ -57,6 +58,7 @@ import { TODOS_NIVEIS_INFECAO } from "../tipos/variaveis";
 import type { RespostaIdentificacao, ResultadoIdentificacao } from "../tipos/identificacao";
 import type { CategoriaTratamento } from "../tipos/tratamento";
 import type { MedidasCausaisResposta, RespostaAluno, ResultadoAvaliacao } from "../tipos/resultado";
+import type { EntradaHistorico } from "../tipos/historico";
 
 const FASES = ["Observação", "Identificação", "Diálogo", "Plano terapêutico", "Justificação"];
 
@@ -96,8 +98,24 @@ function medidasRelevantes(etiologia: string, nivelInfecao: string): MedidaItem[
   return itens;
 }
 
-export default function CaseSolver({ id }: { id: string }) {
+/**
+ * Em que condições o caso está a ser resolvido.
+ *
+ * `"conta"` é o percurso normal: há sessão, o rascunho é guardado no servidor
+ * e o resultado entra no histórico.
+ *
+ * `"testDrive"` é quem chegou pelo link e ainda não se registou. As cinco
+ * fases, a avaliação e o ecrã de resultado são **os mesmos** — não há versão
+ * reduzida nem demonstração encenada, porque o valor demonstrado tem de ser o
+ * valor real. O que muda é só o que toca em persistência: sem sessão não há
+ * rascunho (a rota exige-a) e o resultado fica em `sessionStorage` até a
+ * pessoa decidir se quer ficar.
+ */
+export type ModoResolucao = "conta" | "testDrive";
+
+export default function CaseSolver({ id, modo = "conta" }: { id: string; modo?: ModoResolucao }) {
   const router = useRouter();
+  const testDrive = modo === "testDrive";
   const casoTeste = TODOS_CASOS_TESTE.find((c) => c.id === id);
   const decisao = useMemo(() => (casoTeste ? decidirCaso(casoTeste.caso) : null), [casoTeste]);
   const conteudo = casoTeste ? CONTEUDO_POR_CASO[casoTeste.id] : undefined;
@@ -160,6 +178,8 @@ export default function CaseSolver({ id }: { id: string }) {
   const [rascunhoLido, setRascunhoLido] = useState(false);
   /** Rascunho encontrado com uma versão de dados diferente: fica à espera da decisão do aluno. */
   const [rascunhoDesatualizado, setRascunhoDesatualizado] = useState<RascunhoCaso | null>(null);
+  /** A gravação do resultado no servidor falhou? O aluno tem de saber que este caso não entrou nas estatísticas. */
+  const [erroGravacao, setErroGravacao] = useState(false);
 
   const aplicarRascunho = useCallback((r: RascunhoCaso) => {
     setPhase(r.fase);
@@ -184,18 +204,36 @@ export default function CaseSolver({ id }: { id: string }) {
   useEffect(() => {
     if (!casoTeste) return;
     setOrdemOpcoes(baralharBancoJustificacoes());
-    const guardado = lerRascunho(casoTeste.id);
-    if (guardado) {
-      if (guardado.versaoDados === versaoDados) aplicarRascunho(guardado);
-      else setRascunhoDesatualizado(guardado);
+    // Sem sessão não há rascunho: a rota exige-a, e o estado do test drive vive
+    // só enquanto durar. Marca-se como lido para o efeito de gravação abaixo
+    // saber que não tem nada por que esperar.
+    if (testDrive) {
+      setRascunhoLido(true);
+      return;
     }
-    setRascunhoLido(true);
-  }, [casoTeste, versaoDados, aplicarRascunho]);
+    let cancelado = false;
+    // O rascunho vem agora do servidor, por isso a leitura é assíncrona.
+    // `rascunhoLido` só fica verdadeiro no fim: enquanto não estiver, o efeito
+    // de gravação não corre e não escreve um rascunho vazio por cima do que
+    // ainda está a caminho.
+    lerRascunho(casoTeste.id).then((guardado) => {
+      if (cancelado) return;
+      if (guardado) {
+        if (guardado.versaoDados === versaoDados) aplicarRascunho(guardado);
+        else setRascunhoDesatualizado(guardado);
+      }
+      setRascunhoLido(true);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [casoTeste, versaoDados, aplicarRascunho, testDrive]);
 
   // Gravação: a cada alteração, enquanto o caso não estiver submetido. Nada é
   // escrito enquanto houver um conflito de versão por resolver — isso
   // apagaria o rascunho antigo antes de o aluno escolher o que fazer com ele.
   useEffect(() => {
+    if (testDrive) return;
     if (!casoTeste || !rascunhoLido || rascunhoDesatualizado || screen !== "solve") return;
     const rascunho: RascunhoCaso = {
       versaoDados,
@@ -218,7 +256,7 @@ export default function CaseSolver({ id }: { id: string }) {
     if (rascunhoVazio(rascunho)) apagarRascunho(casoTeste.id);
     else guardarRascunho(casoTeste.id, rascunho);
   }, [
-    casoTeste, rascunhoLido, rascunhoDesatualizado, screen, versaoDados, phase, tecidoAtivo,
+    testDrive, casoTeste, rascunhoLido, rascunhoDesatualizado, screen, versaoDados, phase, tecidoAtivo,
     pins, exVol, exTipo, bordos, pele, nivelInfecaoProposto, perguntado, categorias,
     tecnicasSel, medidas, justRespostas, ordemOpcoes,
   ]);
@@ -316,7 +354,11 @@ export default function CaseSolver({ id }: { id: string }) {
     setResultado(r);
     setResultadoIdentificacao(ri);
     const pontuacaoCombinada = (ri.pontuacaoFinalPercentual + r.pontuacaoFinalPercentual) / 2;
-    registarResultado({
+    // A entrada é construída uma só vez, aqui, e é a mesma nos dois modos —
+    // é isso que torna um resultado migrado do test drive indistinguível de um
+    // resolvido com conta. Só o destino difere: a base de dados, ou a gaveta
+    // do separador enquanto não houver conta.
+    const entrada: EntradaHistorico = {
       casoId: casoTeste!.id,
       titulo: casoTeste!.titulo,
       etiologia: caso.etiologia,
@@ -337,9 +379,21 @@ export default function CaseSolver({ id }: { id: string }) {
       pontuacaoTecnicas: arredondarPontuacao(pontuacaoTecnicas(correspondenciaTecnicas)),
       correspondenciaJustificacoes,
       pontuacaoJustificacoes: arredondarPontuacao(pontuacaoJustificacoes(correspondenciaJustificacoes)),
-    });
-    // O resultado passou a viver no histórico; o rascunho deixou de ter função.
-    apagarRascunho(casoTeste!.id);
+    };
+
+    if (testDrive) {
+      // Nada vai para a base de dados: não há sessão, e todas as rotas de
+      // dados a exigem. Fica no separador até a pessoa decidir se quer ficar.
+      guardarTentativa(entrada);
+    } else {
+      // A gravação no servidor não trava a passagem ao ecrã de resultado: a
+      // avaliação já está feita e o aluno tem direito a vê-la. Se falhar, o
+      // aviso aparece por cima do resultado — o que não pode acontecer é ficar
+      // em silêncio e o caso desaparecer das estatísticas sem explicação.
+      registarResultado(entrada).catch(() => setErroGravacao(true));
+      // O resultado passou a viver no histórico; o rascunho deixou de ter função.
+      apagarRascunho(casoTeste!.id);
+    }
     setScreen("result");
     window.scrollTo({ top: 0 });
   }
@@ -355,6 +409,19 @@ export default function CaseSolver({ id }: { id: string }) {
 
     return (
       <div className="animate-up">
+        {erroGravacao ? (
+          <div
+            className="card"
+            role="alert"
+            style={{ padding: "14px 18px", marginBottom: 16, borderColor: "var(--danger)" }}
+          >
+            <div className="lbl" style={{ color: "var(--danger)" }}>Resultado não guardado</div>
+            <p className="mu" style={{ fontSize: 13, marginTop: 8, lineHeight: 1.6 }}>
+              A avaliação abaixo está correta, mas não foi possível guardá-la na sua conta — este caso não vai
+              aparecer nas estatísticas. Verifique a ligação e resolva-o outra vez quando puder.
+            </p>
+          </div>
+        ) : null}
         <div className="card" style={{ padding: 26, display: "flex", gap: 26, alignItems: "center", flexWrap: "wrap", background: "linear-gradient(120deg,var(--surface-alt),var(--surface) 60%)" }}>
           <div style={{ flex: 1, minWidth: 260 }}>
             <div className="lbl">Resultado · {casoTeste.titulo}</div>
@@ -373,7 +440,8 @@ export default function CaseSolver({ id }: { id: string }) {
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ font: "800 64px/1 inherit", color: "var(--accent)" }}>{Math.round(pontuacaoCombinada)}%</div>
-            <div className="lbl" style={{ marginTop: 8 }}>de 100 · média de identificação + plano terapêutico</div>
+            {/* Sem "de 100": a percentagem no número já diz a escala, e "8% de 100" lia-se a dobrar. */}
+            <div className="lbl" style={{ marginTop: 8 }}>média de identificação + plano terapêutico</div>
             <div className="bar" style={{ width: 200, marginTop: 12 }}>
               <div style={{ width: `${pontuacaoCombinada}%`, height: "100%", background: ACC }} />
             </div>
@@ -443,10 +511,54 @@ export default function CaseSolver({ id }: { id: string }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button className="btn" onClick={() => router.push("/")}>Dashboard</button>
-          <button className="btn btn-p" style={{ marginLeft: "auto" }} onClick={() => router.push("/casos")}>Próximo caso →</button>
-        </div>
+        {testDrive ? (
+          /*
+            O convite a registar é concreto, não genérico: o que se ganha é
+            guardar *este* resultado e continuar a partir dele. O argumento
+            "crie conta para aceder a funcionalidades" não diz nada a quem
+            acabou de ver a avaliação do seu próprio trabalho.
+          */
+          <div className="card" style={{ padding: 24, marginTop: 16, borderColor: "var(--accent)" }}>
+            <div className="lbl" style={{ color: "var(--accent)" }}>Este resultado ainda não está guardado</div>
+            <h2 className="h2" style={{ marginTop: 10 }}>Quer guardar este caso na sua conta?</h2>
+            <ul
+              className="mu"
+              style={{ fontSize: 13.5, lineHeight: 1.8, margin: "12px 0 0", paddingLeft: 20, maxWidth: "60ch" }}
+            >
+              <li>Guarda esta resolução com a pontuação categoria a categoria.</li>
+              <li>Acompanha a evolução ao longo do curso, caso a caso.</li>
+              <li>Dá acesso aos restantes {TODOS_CASOS_TESTE.length - 1} casos, à secção Aprender e à consulta pontual.</li>
+            </ul>
+            <p className="mu" style={{ fontSize: 12.5, marginTop: 14, lineHeight: 1.6 }}>
+              Se sair sem criar conta, esta resolução perde-se — não fica guardada em lado nenhum.
+              Não pedimos email.
+            </p>
+            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-p"
+                onClick={() => router.push(`/login?origem=${ORIGEM_TEST_DRIVE}`)}
+              >
+                Criar conta e guardar este resultado →
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  // Sair é mesmo sair: o botão diz que a resolução se perde,
+                  // e passaria a mentir se a deixasse ficar no separador.
+                  limparTentativa();
+                  router.push("/login");
+                }}
+              >
+                Sair sem guardar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button className="btn" onClick={() => router.push("/")}>Dashboard</button>
+            <button className="btn btn-p" style={{ marginLeft: "auto" }} onClick={() => router.push("/casos")}>Próximo caso →</button>
+          </div>
+        )}
       </div>
     );
   }
@@ -512,11 +624,21 @@ export default function CaseSolver({ id }: { id: string }) {
             className="btn"
             onClick={() => {
               // O botão diz "sem guardar": tem de apagar também o que tinha
-              // sido gravado automaticamente até aqui.
+              // sido gravado automaticamente até aqui. No test drive não há
+              // rascunho nenhum para apagar — nada foi escrito.
+              if (testDrive) {
+                limparTentativa();
+                router.push("/login");
+                return;
+              }
               apagarRascunho(casoTeste.id);
               router.push("/casos");
             }}
-            title="Apaga o que preencheu neste caso, incluindo o rascunho guardado automaticamente."
+            title={
+              testDrive
+                ? "Abandona esta experiência. Nada fica guardado."
+                : "Apaga o que preencheu neste caso, incluindo o rascunho guardado automaticamente."
+            }
           >
             Sair sem guardar
           </button>

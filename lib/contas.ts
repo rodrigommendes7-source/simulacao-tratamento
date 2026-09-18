@@ -1,54 +1,22 @@
-"use client";
-
 /**
- * Contas locais — nome de utilizador único + palavra-passe numérica.
+ * Regras de validação de contas — partilhadas pelo cliente e pelo servidor.
  *
- * AVISO IMPORTANTE SOBRE O ÂMBITO: não há servidor de contas — nada aqui sai
- * do browser (a app contacta a rede para telemetria de visitas de página, que
- * não tem nada que ver com isto). Isto não é autenticação no sentido de
- * segurança — é uma separação de perfis dentro de um browser. Em concreto:
+ * Este ficheiro não tem segredos nem acesso a dados: é só o vocabulário comum
+ * sobre o que é um nome de utilizador válido e o que é a forma canónica desse
+ * nome. O cliente usa-o para dar erro cedo, sem ida à rede; o servidor usa o
+ * mesmo código para validar outra vez, porque validação do lado do cliente é
+ * uma conveniência e nunca uma garantia.
  *
- * - O "único" do nome de utilizador só vale neste browser. Duas pessoas em
- *   computadores diferentes podem registar o mesmo nome; não há nada que o
- *   possa impedir sem um servidor onde os nomes sejam reservados.
- * - Quem tiver acesso ao browser pode apagar o registo de contas pelas
- *   ferramentas de programador e criar outro. Não há aqui nenhuma fronteira
- *   de segurança a proteger.
- * - Uma palavra-passe de 6 dígitos tem, no máximo, um milhão de combinações:
- *   é resistente a alguém que espreite por cima do ombro, não a um ataque.
- *
- * O que mesmo assim se faz bem: a palavra-passe **nunca** é guardada em
- * claro. Guarda-se a derivação PBKDF2-SHA256 com sal próprio por conta, para
- * que ler o localStorage não revele o PIN — que as pessoas tendem a reutilizar
- * noutros sítios onde isso importa de facto.
+ * O que aqui **não** está, e é deliberado: a derivação da palavra-passe. Esta
+ * corre exclusivamente no servidor (lib/servidor/palavraPasse.ts). Uma versão
+ * anterior derivava o hash no browser com PBKDF2 e guardava-o no
+ * `localStorage`; num modelo com servidor, enviar o hash tornaria o hash na
+ * palavra-passe efetiva e uma fuga da base de dados abriria todas as contas.
+ * O cliente envia a palavra-passe por HTTPS e nunca vê um hash.
  */
-
-const CHAVE_CONTAS = "sf_contas";
-
-/** Iterações do PBKDF2. Alto o suficiente para tornar lento testar um PIN de cada vez, sem se notar no ecrã de entrada. */
-const ITERACOES = 150_000;
-const BYTES_SAL = 16;
-const BITS_CHAVE = 256;
-
-export interface Conta {
-  /** Chave única, normalizada (minúsculas, sem espaços a mais). */
-  utilizador: string;
-  /** Como a pessoa o escreveu — é assim que aparece na interface. */
-  nomeApresentacao: string;
-  salHex: string;
-  hashHex: string;
-  iteracoes: number;
-  criadaEm: string;
-}
-
-// ───────────────────────────── Regras de validação ─────────────────────────────
 
 export const MIN_UTILIZADOR = 3;
 export const MAX_UTILIZADOR = 24;
-/**
- * Mínimo de 4 dígitos: o pedido fixou só o máximo (6), e um PIN de 1 ou 2
- * dígitos não separa perfis de forma útil. Alterar aqui se preferir outro.
- */
 export const MIN_PALAVRA_PASSE = 4;
 export const MAX_PALAVRA_PASSE = 6;
 
@@ -56,20 +24,37 @@ export const MAX_PALAVRA_PASSE = 6;
 const CARACTERES_UTILIZADOR = /^[\p{L}\p{N} ._-]+$/u;
 
 /** Só dígitos, entre `MIN_PALAVRA_PASSE` e `MAX_PALAVRA_PASSE`. */
-export const FORMATO_PALAVRA_PASSE = new RegExp(`^\\d{${MIN_PALAVRA_PASSE},${MAX_PALAVRA_PASSE}}$`);
+export const FORMATO_PALAVRA_PASSE = new RegExp(`^\d{${MIN_PALAVRA_PASSE},${MAX_PALAVRA_PASSE}}$`);
 
 /**
- * Forma canónica do nome: é esta que garante a unicidade e que nomeia o
- * espaço de dados. "Ana Silva", "ana silva" e " Ana  Silva " são a mesma
- * pessoa — sem isto, a mesma pessoa criaria históricos separados por escrever
- * o nome de maneira diferente.
+ * Forma canónica do nome — é esta que a base de dados guarda em
+ * `utilizadores.nome_canonico`, com restrição UNIQUE.
+ *
+ * Minúsculas, espaços colapsados **e acentos removidos**: "Ana Antão",
+ * "ana antao" e " ANA   ANTÃO " são a mesma pessoa e não podem dar três
+ * contas. A remoção de acentos é feita aqui, na aplicação, e não com a
+ * extensão `unaccent` do Postgres: assim é determinística, portável e
+ * testável sem base de dados.
+ *
+ * `NFD` separa a letra do sinal diacrítico; o intervalo `\u0300-\u036f` é o
+ * bloco dos sinais combinatórios, que fica de fora.
  */
 export function normalizarUtilizador(nome: string): string {
-  return nome.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-PT");
+  return nome
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("pt-PT")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Como a pessoa escreveu o nome, só com os espaços arrumados — é assim que aparece na interface. */
+export function nomeApresentacao(nome: string): string {
+  return nome.trim().replace(/\s+/g, " ");
 }
 
 export function validarUtilizador(nome: string): string | null {
-  const limpo = nome.trim().replace(/\s+/g, " ");
+  const limpo = nomeApresentacao(nome);
   if (limpo.length < MIN_UTILIZADOR) return `O nome tem de ter pelo menos ${MIN_UTILIZADOR} caracteres.`;
   if (limpo.length > MAX_UTILIZADOR) return `O nome não pode ter mais de ${MAX_UTILIZADOR} caracteres.`;
   if (!CARACTERES_UTILIZADOR.test(limpo)) return "Use apenas letras, números, espaços, ponto, hífen ou underscore.";
@@ -84,138 +69,11 @@ export function validarPalavraPasse(palavraPasse: string): string | null {
   return null;
 }
 
-// ───────────────────────────── Derivação da palavra-passe ─────────────────────────────
-
-function paraHex(bytes: Uint8Array): string {
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function deHex(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
-
-function subtle(): SubtleCrypto {
-  const c = globalThis.crypto?.subtle;
-  // Sem Web Crypto não há forma honesta de guardar isto — mais vale falhar do
-  // que cair para texto em claro sem ninguém dar por isso.
-  if (!c) throw new Error("Web Crypto indisponível: não é possível guardar a palavra-passe em segurança.");
-  return c;
-}
-
-async function derivar(palavraPasse: string, sal: Uint8Array, iteracoes: number): Promise<string> {
-  const material = await subtle().importKey("raw", new TextEncoder().encode(palavraPasse), "PBKDF2", false, [
-    "deriveBits",
-  ]);
-  const bits = await subtle().deriveBits(
-    { name: "PBKDF2", salt: sal as BufferSource, iterations: iteracoes, hash: "SHA-256" },
-    material,
-    BITS_CHAVE,
-  );
-  return paraHex(new Uint8Array(bits));
-}
-
-/** Comparação em tempo constante — não muda nada na prática aqui, mas é o hábito certo a ter num caminho de autenticação. */
-function iguaisEmTempoConstante(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diferenca = 0;
-  for (let i = 0; i < a.length; i++) diferenca |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diferenca === 0;
-}
-
-// ───────────────────────────── Registo de contas ─────────────────────────────
-
-export function lerContas(): Record<string, Conta> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(CHAVE_CONTAS);
-    if (!raw) return {};
-    const valor = JSON.parse(raw) as unknown;
-    return valor && typeof valor === "object" ? (valor as Record<string, Conta>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function escreverContas(contas: Record<string, Conta>): void {
-  window.localStorage.setItem(CHAVE_CONTAS, JSON.stringify(contas));
-}
-
-export function contaExiste(nome: string): boolean {
-  return normalizarUtilizador(nome) in lerContas();
-}
-
-export function obterConta(nome: string): Conta | null {
-  return lerContas()[normalizarUtilizador(nome)] ?? null;
-}
-
-export interface ResultadoConta {
-  ok: boolean;
-  erro?: string;
-  conta?: Conta;
-}
-
-/** Cria uma conta nova. Falha se o nome já existir neste browser. */
-export async function criarConta(nome: string, palavraPasse: string): Promise<ResultadoConta> {
-  const erroNome = validarUtilizador(nome);
-  if (erroNome) return { ok: false, erro: erroNome };
-  const erroPasse = validarPalavraPasse(palavraPasse);
-  if (erroPasse) return { ok: false, erro: erroPasse };
-
-  const utilizador = normalizarUtilizador(nome);
-  const contas = lerContas();
-  if (utilizador in contas) return { ok: false, erro: "Já existe uma conta com esse nome neste dispositivo." };
-
-  const sal = crypto.getRandomValues(new Uint8Array(BYTES_SAL));
-  const conta: Conta = {
-    utilizador,
-    nomeApresentacao: nome.trim().replace(/\s+/g, " "),
-    salHex: paraHex(sal),
-    hashHex: await derivar(palavraPasse, sal, ITERACOES),
-    iteracoes: ITERACOES,
-    criadaEm: new Date().toISOString(),
-  };
-
-  escreverContas({ ...contas, [utilizador]: conta });
-  return { ok: true, conta };
-}
-
 /**
- * Verifica as credenciais. A mensagem de erro é a mesma para nome inexistente
- * e palavra-passe errada — não vale a pena dizer a quem tenta quais os nomes
- * que existem.
+ * Mensagem única para credenciais erradas.
+ *
+ * É a mesma para nome inexistente e para palavra-passe errada, de propósito:
+ * distinguir os dois casos diria a quem tenta quais os nomes que existem, e
+ * sem email a lista de nomes é metade do trabalho de um ataque.
  */
-export async function autenticar(nome: string, palavraPasse: string): Promise<ResultadoConta> {
-  const conta = obterConta(nome);
-  if (!conta) return { ok: false, erro: "Nome de utilizador ou palavra-passe incorretos." };
-
-  const hash = await derivar(palavraPasse, deHex(conta.salHex), conta.iteracoes ?? ITERACOES);
-  if (!iguaisEmTempoConstante(hash, conta.hashHex)) {
-    return { ok: false, erro: "Nome de utilizador ou palavra-passe incorretos." };
-  }
-  return { ok: true, conta };
-}
-
-/** Altera a palavra-passe, exigindo a atual. */
-export async function alterarPalavraPasse(
-  nome: string,
-  atual: string,
-  nova: string,
-): Promise<ResultadoConta> {
-  const verificacao = await autenticar(nome, atual);
-  if (!verificacao.ok || !verificacao.conta) return { ok: false, erro: "Palavra-passe atual incorreta." };
-
-  const erroNova = validarPalavraPasse(nova);
-  if (erroNova) return { ok: false, erro: erroNova };
-
-  const sal = crypto.getRandomValues(new Uint8Array(BYTES_SAL));
-  const atualizada: Conta = {
-    ...verificacao.conta,
-    salHex: paraHex(sal),
-    hashHex: await derivar(nova, sal, ITERACOES),
-    iteracoes: ITERACOES,
-  };
-  escreverContas({ ...lerContas(), [atualizada.utilizador]: atualizada });
-  return { ok: true, conta: atualizada };
-}
+export const ERRO_CREDENCIAIS = "Nome de utilizador ou palavra-passe incorretos.";

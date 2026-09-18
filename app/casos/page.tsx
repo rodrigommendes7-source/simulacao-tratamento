@@ -17,7 +17,11 @@ export default function CasosPage() {
   const [historico, setHistorico] = useState<EntradaHistorico[]>([]);
 
   useEffect(() => {
-    setHistorico(obterHistorico());
+    // O histórico vem do servidor. Falhar aqui deixa o ecrã no estado de quem
+    // ainda não resolveu nada — o AppShell trata do caso de não haver sessão.
+    obterHistorico()
+      .then(setHistorico)
+      .catch(() => setHistorico([]));
   }, []);
 
   const etiologiasPresentes = useMemo(

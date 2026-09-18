@@ -3,11 +3,10 @@
 /**
  * Rascunho de um caso por terminar.
  *
- * Até aqui, sair a meio de um caso deitava fora as cinco fases: nada era
- * escrito enquanto o caso não fosse submetido. Agora o estado do ecrã de
- * resolução é guardado no armazenamento local, numa chave por **caso e
- * aluno** — dois alunos no mesmo browser têm rascunhos independentes, pela
- * mesma razão que já têm históricos independentes (lib/armazenamento.ts).
+ * Sair a meio de um caso não deita fora as cinco fases: o estado do ecrã de
+ * resolução é guardado na conta do aluno, no servidor, num registo por **caso
+ * e utilizador**. Antes vivia no `localStorage`; a diferença prática é que o
+ * rascunho passou a acompanhar a pessoa entre computadores.
  *
  * O rascunho é deliberadamente curto de vida. É apagado quando o caso é
  * submetido (o resultado passa a viver no histórico) e quando o aluno carrega
@@ -32,9 +31,7 @@ import type {
 } from "../tipos/variaveis";
 import type { CategoriaTratamento } from "../tipos/tratamento";
 import type { MedidasCausaisResposta } from "../tipos/resultado";
-import { chaveDoAluno } from "./armazenamento";
-
-const BASE_CHAVE = "sf_rascunho_caso";
+import { json, pedir } from "./api";
 
 /**
  * Estado do ecrã de resolução, em forma serializável. Os `Set` do componente
@@ -91,45 +88,68 @@ export function versaoDadosDoCaso(caso: unknown, decisao: unknown): string {
   return impressaoDigital(JSON.stringify({ caso, decisao }));
 }
 
-function chave(casoId: string): string {
-  return chaveDoAluno(`${BASE_CHAVE}:${casoId}`);
+function caminho(casoId: string): string {
+  return `/api/rascunhos/${encodeURIComponent(casoId)}`;
 }
 
-export function lerRascunho(casoId: string): RascunhoCaso | null {
-  if (typeof window === "undefined") return null;
+export async function lerRascunho(casoId: string): Promise<RascunhoCaso | null> {
   try {
-    const bruto = window.localStorage.getItem(chave(casoId));
-    if (!bruto) return null;
-    const valor = JSON.parse(bruto) as unknown;
-    if (!valor || typeof valor !== "object") return null;
-    const r = valor as Partial<RascunhoCaso>;
+    const r = await pedir<{ rascunho: RascunhoCaso | null }>(caminho(casoId));
     // Um rascunho sem os campos estruturais não é aproveitável; mais vale
     // ignorá-lo do que deixar o ecrã carregar com `undefined` por todo o lado.
-    if (typeof r.versaoDados !== "string" || !Array.isArray(r.pins)) return null;
-    return r as RascunhoCaso;
+    const v = r.rascunho;
+    if (!v || typeof v.versaoDados !== "string" || !Array.isArray(v.pins)) return null;
+    return v;
   } catch {
+    // Não conseguir ler o rascunho significa começar o caso do zero. É uma
+    // perda de conveniência, não de dados submetidos — não vale a pena travar
+    // o ecrã por causa dela.
     return null;
   }
 }
 
+/**
+ * Atraso antes de gravar. O ecrã de resolução chama isto a cada alteração de
+ * estado — cada pin colocado, cada caixa marcada. Sem o atraso, arrastar um
+ * pin pelo mapa da ferida dispararia dezenas de pedidos. Com ele, grava-se
+ * uma vez quando a pessoa para.
+ */
+const ATRASO_GRAVACAO_MS = 800;
+
+const gravacoesAgendadas = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Agenda a gravação do rascunho. Não devolve promessa de propósito: o ecrã
+ * não espera por isto nem deve mostrar erro se falhar — um rascunho é uma
+ * rede de segurança, e uma rede de segurança que interrompe o trabalho para
+ * se queixar é pior do que não a haver.
+ */
 export function guardarRascunho(casoId: string, rascunho: RascunhoCaso): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(chave(casoId), JSON.stringify(rascunho));
-  } catch {
-    /* quota cheia ou armazenamento indisponível — perder o rascunho não pode partir o ecrã. */
-  }
+  clearTimeout(gravacoesAgendadas.get(casoId));
+  gravacoesAgendadas.set(
+    casoId,
+    setTimeout(() => {
+      gravacoesAgendadas.delete(casoId);
+      void pedir(caminho(casoId), { method: "PUT", ...json({ rascunho }) }).catch(() => {});
+    }, ATRASO_GRAVACAO_MS),
+  );
 }
 
+/**
+ * Apaga o rascunho. Cancela primeiro qualquer gravação ainda por sair: sem
+ * isso, uma gravação agendada podia chegar ao servidor **depois** do apagar e
+ * ressuscitar o rascunho que o aluno acabou de dispensar.
+ */
 export function apagarRascunho(casoId: string): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(chave(casoId));
+  clearTimeout(gravacoesAgendadas.get(casoId));
+  gravacoesAgendadas.delete(casoId);
+  void pedir(caminho(casoId), { method: "DELETE" }).catch(() => {});
 }
 
 /**
  * O rascunho não tem nada que valha a pena guardar?
  *
- * Abrir um caso e sair sem lhe tocar não deve deixar lixo no armazenamento —
+ * Abrir um caso e sair sem lhe tocar não deve deixar lixo na base de dados —
  * e, mais importante, não deve criar um rascunho que depois "restaure" um
  * ecrã vazio por cima de nada.
  */

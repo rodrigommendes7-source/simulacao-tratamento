@@ -32,7 +32,13 @@ export default function EstatisticasPage() {
   const [historico, setHistorico] = useState<EntradaHistorico[] | null>(null);
 
   useEffect(() => {
-    setHistorico(obterHistorico());
+    // O histórico vem agora do servidor. Um erro (sessão caducada, rede em
+    // baixo) cai na lista vazia: o AppShell já encaminha para a entrada
+    // quando não há sessão, e um ecrã de estatísticas meio construído seria
+    // pior do que o estado "ainda sem dados".
+    obterHistorico()
+      .then(setHistorico)
+      .catch(() => setHistorico([]));
   }, []);
 
   const resumo = useMemo(() => calcularResumoGeral(historico ?? []), [historico]);
@@ -52,9 +58,10 @@ export default function EstatisticasPage() {
           <div className="lbl">Ainda sem dados</div>
           <h2 className="h2" style={{ marginTop: 12 }}>Resolva o seu primeiro caso para começar a ver estatísticas.</h2>
           <p className="mu" style={{ fontSize: 13.5, marginTop: 10, maxWidth: "50ch", marginInline: "auto" }}>
-            O seu histórico fica no armazenamento local deste browser e não é enviado para nenhum
-            servidor — ninguém o compara com o de outros alunos. A app recolhe estatísticas
-            anónimas de visitas de página, que não incluem nada do que resolve aqui.
+            O seu histórico fica guardado na sua conta, no servidor do simulador, para poder entrar de
+            qualquer computador e continuar de onde ficou. É seu: nenhum outro utilizador lhe tem acesso.
+            Pode apagar a conta e todo o histórico quando quiser.{" "}
+            <Link href="/privacidade" style={{ color: "var(--accent)" }}>Como tratamos os seus dados</Link>.
           </p>
           <Link href="/casos" className="btn btn-p" style={{ marginTop: 20, display: "inline-flex" }}>
             Resolver um caso →
@@ -71,7 +78,8 @@ export default function EstatisticasPage() {
     <div className="animate-up">
       <h1 className="h1">Estatísticas</h1>
       <p className="mu" style={{ fontSize: 13, marginTop: 6 }}>
-        Histórico guardado no armazenamento local deste browser, por conta. Não é comparado com o de outros alunos.
+        Histórico guardado na sua conta. Só o próprio tem acesso.{" "}
+        <Link href="/privacidade" style={{ color: "var(--accent)" }}>Como tratamos os seus dados</Link>.
       </p>
 
       {/* 1. Resumo geral */}
